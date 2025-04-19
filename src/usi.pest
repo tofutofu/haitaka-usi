@@ -30,20 +30,20 @@
 // Numbers
 // -------
 // I chose to not put any restrictions in the syntax on numbers. Checking that a value
-// makes sense should be done in the parser (or by the engine). One reason of not
-// restricting this on a too low level is that it gives the parser + engine more freedom
+// makes sense should imo be done in the parser (or by the engine). One reason of not
+// restricting this on a too low level is also that it gives the parser + engine more freedom
 // (e.g. the freedom to allow very long mate problems with over a 1000 moves as input).
-// A more principled reason is that the USI spec (even though this is not a formal spec) 
-// doesn't specify any restrictions. The downside is that this does require the GUI or
-// engine to guard more carefully against possibly crazy input.
+// A more principled reason is that the USI spec (even though it is not a formal spec) 
+// doesn't specify any restrictions. Downside is that this does require the GUI or engine
+// to guard more carefully against possibly crazy input.
 //
 // The published specs are extremely vague about error conditions. For instance:
 // Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should it 
 // be an error? Should `debugon` and `de bugon` be parsed as `debug on`, or as garbage?
 // Since the spec talks about "tokens" (without defining those), it seems reasonable to interpret 
-// all keywords as "tokens" and to _require_ that all must be delimited either by white-space 
+// all keywords as "tokens" and to require that all must be delimited either by white-space 
 // (including newlines) or by SOI (start of input) or EOI (end of input). In the grammar below, 
-// I have enforced this.
+// I have enforced this by using a special "boundary" marker (`KB`) on messages.
 
 WHITESPACE = _{ " " | "\t" }
 WS = _{ WHITESPACE+ }

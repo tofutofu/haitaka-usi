@@ -3,11 +3,10 @@
 Haitaka-usi is a [Universal Shogi Interface (USI) protocol](http://hgm.nubati.net/usi.html) parser and serializer.
 
 The USI protocol is a simple protocol for Shogi GUI clients and engines to communicate with each other. 
-The protocol is derived from the [UCI (Universal Chess Interface) protocol](https://backscattering.de/chess/uci/) for Chess engines, with minor modifications to support Shogi.
+The protocol is based on the [UCI (Universal Chess Interface) protocol](https://backscattering.de/chess/uci/) for Chess engines with modifications to support Shogi.
 
-The parser code used a [PEST](https://github.com/pest-parser/pest) grammar to define the protocol syntax. The `usi.pest` grammar file
-was initially inspired by the `uci.pest` file provided by [Vampirc UCI](https://github.com/vampirc/vampirc-uci/tree/master). The `uci.pest` file was a great help to quickly get up to speed with using PEST, but in the end I decided to rewrite most of the grammar in order to support the required changes for Shogi and to streamline the grammar.
-
+The parser code uses a [PEST](https://github.com/pest-parser/pest) grammar to define the protocol syntax. The `usi.pest` grammar file
+was initially inspired by the `uci.pest` file provided by [Vampirc UCI](https://github.com/vampirc/vampirc-uci/tree/master). The `uci.pest` file was a great help to get up to speed with using PEST, but in the end I decided to rewrite most of the grammar, both in order to make the grammar more uniform and to support USI features. The object model in `usi.rs` was also inspired by Vampirc UCI, but the actual implementation here is rather different. 
 
 ## Installation
 
@@ -16,6 +15,14 @@ TODO
 ## Usage
 
 TODO
+
+## Testing
+
+TODO
+
+## API
+
+The API docs are available at TODO.
 
 ## Supported Protocol Messages
 
