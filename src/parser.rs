@@ -1,13 +1,13 @@
 // parser.rs
 
-use core::str::FromStr;
-use std::fmt::Debug;
 use chrono::Duration;
+use core::str::FromStr;
 use haitaka_types::Move;
 use pest::Parser; // trait
 use pest::error::Error;
 use pest::iterators::{Pair, Pairs};
-use pest_derive::Parser; // procedural macro
+use pest_derive::Parser;
+use std::fmt::Debug; // procedural macro
 
 use crate::usi::*;
 
@@ -23,7 +23,6 @@ pub fn dbg(s: &str) {
         println!("{:#?}", res);
     }
 }
-
 
 pub fn parse(s: &str) -> UsiMessageList {
     let mut messages = UsiMessageList::new();
@@ -54,10 +53,17 @@ pub fn parse_one(s: &str) -> UsiMessage {
     return UsiMessage::Unknown(String::new(), None);
 }
 
-/// Expand a GuiMessage variant into it's fully qualified name.
+/// Expand a GuiMessage variant into it's full name.
 macro_rules! gui {
     ($variant:ident) => {
         UsiMessage::UsiGuiToEngine(GuiMessage::$variant)
+    };
+}
+
+/// Expand an EngineMessage variant into it's full name
+macro_rules! engine {
+    ($variant:ident) => {
+        UsiMessage::UsiEngineToGui(EngineMessage::$variant)
     };
 }
 
@@ -86,17 +92,27 @@ fn parse_usi(
 
     for pair in pairs {
         let msg = match pair.as_rule() {
+            // gui-to-engine
             Rule::usi => gui!(Usi),
-            Rule::debug => GuiMessage::parse_debug(pair),
+            Rule::debug => UsiMessage::parse_debug(pair),
             Rule::isready => gui!(IsReady),
-            Rule::setoption => GuiMessage::parse_setoption(pair),
-            Rule::register => GuiMessage::parse_register(pair),
+            Rule::setoption => UsiMessage::parse_setoption(pair),
+            Rule::register => UsiMessage::parse_register(pair),
             Rule::usinewgame => gui!(UsiNewGame),
             Rule::stop => gui!(Stop),
             Rule::quit => gui!(Quit),
             Rule::ponderhit => gui!(PonderHit),
-            Rule::position => GuiMessage::parse_position(pair),
-            Rule::go => GuiMessage::parse_go(pair),
+            Rule::position => UsiMessage::parse_position(pair),
+            Rule::go => UsiMessage::parse_go(pair),
+            // engine-to-gui
+            Rule::id => UsiMessage::parse_id(pair),
+            Rule::usiok => engine!(UsiOk),
+            Rule::readyok => engine!(ReadyOk),
+            Rule::bestmove => UsiMessage::parse_bestmove(pair),
+            Rule::copyprotection => UsiMessage::parse_copyprotection(pair),
+            Rule::registration => UsiMessage::parse_registration(pair),
+            Rule::option => UsiMessage::parse_option(pair),
+            Rule::info => UsiMessage::parse_info(pair),
             _ => UsiMessage::Unknown(spanstr!(pair), None),
         };
 
@@ -110,7 +126,10 @@ fn parse_usi(
     Ok(None)
 }
 
-impl GuiMessage {
+impl UsiMessage {
+    //
+    // gui-to-engine
+    //
     pub fn parse_debug(pair: Pair<Rule>) -> UsiMessage {
         let on = !pair.as_span().as_str().trim_end().ends_with("off");
         UsiMessage::UsiGuiToEngine(GuiMessage::Debug(on))
@@ -181,9 +200,7 @@ impl GuiMessage {
                     sfen = Some(spanstr!(sp));
                 }
                 Rule::moves => {
-                    let mut mvs = Vec::<Move>::new();
-                    Self::parse_moves::<false>(sp, &mut mvs);
-                    moves = Some(mvs);
+                    moves = Some(Self::parse_moves::<false>(sp));
                 }
                 _ => unreachable!(),
             }
@@ -195,7 +212,25 @@ impl GuiMessage {
         })
     }
 
-    fn parse_moves<const DEEP: bool>(pair: Pair<Rule>, moves: &mut Vec<Move>) {
+    fn parse_moves_inplace<const DEEP: bool>(pair: Pair<Rule>, moves: &mut Vec<Move>) {
+        for sp in pair.into_inner() {
+            if let Rule::one_move = sp.as_rule() {
+                // REVIEW: The grammar should really already guard against errors,
+                // so should I simply use from_str(...).ok() ?
+                match Move::from_str(spinstr!(sp)) {
+                    Ok(mv) => moves.push(mv),
+                    Err(err) => eprintln!("Failed to parse move '{}': {}", spinstr!(sp), err),
+                }
+            } else if DEEP && sp.as_rule() == Rule::moves {
+                Self::parse_moves_inplace::<true>(sp, moves);
+            }
+        }
+        debug_assert!(!moves.is_empty());
+    }
+
+    fn parse_moves<const DEEP: bool>(pair: Pair<Rule>) -> Vec<Move> {
+        let mut moves = Vec::<Move>::new();
+
         for sp in pair.into_inner() {
             if let Rule::one_move = sp.as_rule() {
                 match Move::from_str(spinstr!(sp)) {
@@ -203,10 +238,24 @@ impl GuiMessage {
                     Err(err) => eprintln!("Failed to parse move '{}': {}", spinstr!(sp), err),
                 }
             } else if DEEP && sp.as_rule() == Rule::moves {
-                Self::parse_moves::<true>(sp, moves);
+                // Recursive call with the same optional vector
+                Self::parse_moves_inplace::<DEEP>(sp, &mut moves);
             }
         }
-        debug_assert!(!moves.is_empty());        
+
+        moves
+    }
+
+    fn parse_one_move(pair: Pair<Rule>) -> Move {
+        for sp in pair.into_inner() {
+            if let Rule::one_move = sp.as_rule() {
+                match Move::from_str(spinstr!(sp)) {
+                    Ok(mv) => return mv,
+                    Err(err) => eprintln!("Failed to parse move '{}': {}", spinstr!(sp), err),
+                }
+            }
+        }
+        unreachable!();
     }
 
     pub fn parse_go(pair: Pair<Rule>) -> UsiMessage {
@@ -218,37 +267,58 @@ impl GuiMessage {
         let mut sc = UsiSearchControl::default();
         let mut has_tc = false;
         let mut byoyomi: Option<Duration> = None;
-        let mut black_time: Option<Duration> = None;        
-        let mut white_time: Option<Duration> = None;        
-        let mut black_increment: Option<Duration> = None;        
+        let mut black_time: Option<Duration> = None;
+        let mut white_time: Option<Duration> = None;
+        let mut black_increment: Option<Duration> = None;
         let mut white_increment: Option<Duration> = None;
         let mut moves_to_go: Option<u8> = None;
 
-        for sp in pair.into_inner() {            
+        for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::searchmoves => Self::parse_moves::<true>(sp, &mut sc.searchmoves),
+                Rule::searchmoves => Self::parse_moves_inplace::<true>(sp, &mut sc.searchmoves),
                 Rule::depth => sc.depth = Self::parse_digits::<u16>(sp),
                 Rule::nodes => sc.nodes = Self::parse_digits::<u64>(sp),
                 Rule::mate => sc.mate = Self::parse_digits::<u16>(sp),
 
-                Rule::byoyomi => { has_tc = true; byoyomi = Self::parse_millisecs(sp) } 
-                Rule::btime => { has_tc = true; black_time = Self::parse_millisecs(sp) }
-                Rule::wtime => { has_tc = true; white_time = Self::parse_millisecs(sp) }
-                Rule::binc => { has_tc = true; black_increment = Self::parse_millisecs(sp) }
-                Rule::winc => { has_tc = true; white_increment = Self::parse_millisecs(sp) }
-                Rule::movestogo => { has_tc = true; moves_to_go = Self::parse_digits::<u8>(sp) } 
+                Rule::byoyomi => {
+                    has_tc = true;
+                    byoyomi = Self::parse_millisecs(sp)
+                }
+                Rule::btime => {
+                    has_tc = true;
+                    black_time = Self::parse_millisecs(sp)
+                }
+                Rule::wtime => {
+                    has_tc = true;
+                    white_time = Self::parse_millisecs(sp)
+                }
+                Rule::binc => {
+                    has_tc = true;
+                    black_increment = Self::parse_millisecs(sp)
+                }
+                Rule::winc => {
+                    has_tc = true;
+                    white_increment = Self::parse_millisecs(sp)
+                }
+                Rule::movestogo => {
+                    has_tc = true;
+                    moves_to_go = Self::parse_digits::<u8>(sp)
+                }
 
-                // implicit assumption is that these are alternatives
+                // implicit assumption is that these are alternatives   TODO: double-check
                 Rule::ponder => time_control = Some(UsiTimeControl::Ponder),
-                Rule::movetime => time_control = Some(UsiTimeControl::MoveTime(Self::parse_millisecs(sp).unwrap())),
+                Rule::movetime => {
+                    time_control =
+                        Some(UsiTimeControl::MoveTime(Self::parse_millisecs(sp).unwrap()))
+                }
                 Rule::infinite => time_control = Some(UsiTimeControl::Infinite),
-                _ => unreachable!()
-            }        
+                _ => unreachable!(),
+            }
         }
 
         if sc.is_active() {
             search_control = Some(sc);
-        } 
+        }
 
         if time_control.is_none() && has_tc {
             time_control = Some(UsiTimeControl::TimeLeft {
@@ -258,22 +328,31 @@ impl GuiMessage {
                 black_increment,
                 moves_to_go,
                 byoyomi,
-            });                        
+            });
         } else if has_tc {
             // TODO: Check this against Stockfish/Apery/YaneuraOu
 
             // The currently implemented TimeControl enum is not able to handle this.
             // If this really is an error, shouldn't the grammar this forbid it on the syntax level?
             // e.g. `go ponder mate 15`
-            eprintln!("WARNING: Ignoring time control related subcommands in `{}`", msg);
-            eprintln!("Commands `go ponder`, `go infinite` and `go movetime <ms>` should be sent as separate messages.");
+            eprintln!(
+                "WARNING: Ignoring time control related subcommands in `{}`",
+                msg
+            );
+            eprintln!(
+                "Commands `go ponder`, `go infinite` and `go movetime <ms>` should be sent as separate messages."
+            );
         }
 
-        UsiMessage::UsiGuiToEngine(GuiMessage::Go { time_control, search_control })
+        UsiMessage::UsiGuiToEngine(GuiMessage::Go {
+            time_control,
+            search_control,
+        })
     }
 
-    fn parse_digits<T: FromStr + Debug>(pair: Pair<Rule>) -> Option<T> 
-    where <T as FromStr>::Err: Debug
+    fn parse_digits<T: FromStr + Debug>(pair: Pair<Rule>) -> Option<T>
+    where
+        <T as FromStr>::Err: Debug,
     {
         for sp in pair.into_inner() {
             if let Rule::digits = sp.as_rule() {
@@ -314,6 +393,151 @@ impl GuiMessage {
         None // unreachable!()
     }
 
+    // engine-to-gui
+
+    pub fn parse_id(pair: Pair<Rule>) -> UsiMessage {
+        let mut name: Option<String> = None;
+        let mut author: Option<String> = None;
+
+        for sp in pair.into_inner() {
+            match sp.as_rule() {
+                Rule::id_name => {
+                    name = Some(spanstr!(sp));
+                }
+                Rule::id_author => {
+                    author = Some(spanstr!(sp));
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        UsiMessage::UsiEngineToGui(EngineMessage::Id { name, author })
+    }
+
+    pub fn parse_bestmove(pair: Pair<Rule>) -> UsiMessage {
+        let mut best_move: Move = Move::from_str("1a1a").unwrap(); // an invalid default move
+        let mut ponder: Option<Move> = None;
+
+        for sp in pair.into_inner() {
+            match sp.as_rule() {
+                Rule::bestmove => {
+                    best_move = Move::from_str(spinstr!(sp)).unwrap();
+                }
+                Rule::ponder_move => {
+                    ponder = Some(Move::from_str(spinstr!(sp)).unwrap());
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        UsiMessage::UsiEngineToGui(EngineMessage::BestMove { best_move, ponder })
+    }
+
+    pub fn parse_copyprotection(pair: Pair<Rule>) -> UsiMessage {
+        let state = Self::parse_status_check(pair);
+        UsiMessage::UsiEngineToGui(EngineMessage::CopyProtection(state))
+    }
+
+    pub fn parse_registration(pair: Pair<Rule>) -> UsiMessage {
+        let state = Self::parse_status_check(pair);
+        UsiMessage::UsiEngineToGui(EngineMessage::Registration(state))
+    }
+
+    fn parse_status_check(pair: Pair<Rule>) -> StatusCheck {
+        for sp in pair.into_inner() {
+            if let Rule::status_check = sp.as_rule() {
+                match spinstr!(sp) {
+                    "checking" => return StatusCheck::Checking,
+                    "ok" => return StatusCheck::Ok,
+                    "error" => return StatusCheck::Error,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        unreachable!()
+    }
+
+    pub fn parse_option(_pair: Pair<Rule>) -> UsiMessage {
+        UsiMessage::Unknown("option".to_string(), None)
+    }
+
+    pub fn parse_info(pair: Pair<Rule>) -> UsiMessage {
+        let mut v: Vec<UsiInfo> = Vec::<UsiInfo>::new();
+        for sp in pair.into_inner() {
+            let info: UsiInfo = match sp.as_rule() {
+                // general
+                Rule::info_depth => UsiInfo::Depth(Self::parse_digits::<u16>(sp).unwrap()),
+                Rule::info_seldepth => UsiInfo::SelDepth(Self::parse_digits::<u16>(sp).unwrap()),
+                Rule::info_time => UsiInfo::Time(Self::parse_millisecs(sp).unwrap()),
+                Rule::info_nodes => UsiInfo::Nodes(Self::parse_digits::<u64>(sp).unwrap()),
+                Rule::info_currmovenum => {
+                    UsiInfo::CurrMoveNum(Self::parse_digits::<u16>(sp).unwrap())
+                }
+                Rule::info_currmove => UsiInfo::CurrMove(Self::parse_one_move(sp)),
+                Rule::info_hashfull => UsiInfo::HashFull(Self::parse_digits::<u16>(sp).unwrap()),
+                Rule::info_nps => UsiInfo::Nps(Self::parse_digits::<u64>(sp).unwrap()),
+                Rule::info_cpuload => UsiInfo::CpuLoad(Self::parse_digits::<u16>(sp).unwrap()),
+                Rule::info_multipv => UsiInfo::MultiPv(Self::parse_digits::<u16>(sp).unwrap()),
+                Rule::info_string => UsiInfo::String(spanstr!(sp)),
+                // lines
+                Rule::info_pv => UsiInfo::Pv(Self::parse_moves::<true>(sp)),
+                Rule::info_refutation => UsiInfo::Refutation(Self::parse_moves::<true>(sp)),
+                Rule::info_currline => Self::parse_currline(sp),
+                // score
+                Rule::info_score => Self::parse_score(sp),
+                _ => unreachable!(),
+            };
+            v.push(info);
+        }
+        UsiMessage::UsiEngineToGui(EngineMessage::Info(v))
+    }
+
+    fn parse_currline(pair: Pair<Rule>) -> UsiInfo {
+        let mut cpu_nr: Option<u16> = None;
+        let mut line: Vec<Move> = Vec::<Move>::new();
+
+        for sp in pair.into_inner() {
+            match sp.as_rule() {
+                Rule::digits => {
+                    cpu_nr = Some(Self::parse_digits::<u16>(sp).unwrap());
+                }
+                Rule::moves => {
+                    Self::parse_moves_inplace::<false>(sp, &mut line);
+                }
+                _ => unreachable!(),
+            }
+        }
+        UsiInfo::CurrLine { cpu_nr, line }
+    }
+
+    fn parse_score(pair: Pair<Rule>) -> UsiInfo {
+        let mut cp: Option<i32> = None;
+        let mut mate: Option<i16> = None;
+        let mut lowerbound: Option<bool> = None;
+        let mut upperbound: Option<bool> = None;
+
+        for sp in pair.into_inner() {
+            match sp.as_rule() {
+                Rule::score_cp => {
+                    cp = Some(spinstr!(sp).parse::<i32>().unwrap());
+                }
+                Rule::score_mate => {
+                    mate = Some(spinstr!(sp).parse::<i16>().unwrap());
+                }
+                Rule::score_lowerbound => {
+                    lowerbound = Some(true);
+                }
+                Rule::score_upperbound => {
+                    upperbound = Some(true);
+                }
+                _ => unreachable!(),
+            }
+        }
+        UsiInfo::Score {
+            cp,
+            mate,
+            lowerbound,
+            upperbound,
+        }
+    }
 }
-
-

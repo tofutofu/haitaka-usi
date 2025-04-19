@@ -120,7 +120,7 @@ isready = { "isready" ~ &KB }
 
 setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
 
-    // option_name and option_value are allowed to included whitespace
+    // "The name and value of the option in id should not be case sensitive and can inlude spaces."
     // `value` will consume until EOL
     // if no value is found, then `name` may consume rest of line
     setoption_name = ${ setoption_token ~ (WS ~ setoption_token)* }
@@ -233,11 +233,11 @@ bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)? ~ &KB }
 
     ponder_move = { "ponder" ~ WS ~ one_move }
 
-copyprotection = ${ "copyprotection" ~ WS ~ protection_status ~ &KB }
+copyprotection = ${ "copyprotection" ~ WS ~ status_check ~ &KB }
 
-registration = ${ "registration" ~ WS ~ protection_status ~ &KB }
+registration = ${ "registration" ~ WS ~ status_check ~ &KB }
 
-    protection_status = { "checking" | "ok" | "error" }
+    status_check = { "checking" | "ok" | "error" }
 
 // Option examples:
 // option name Nullmove type check default true\n
@@ -245,6 +245,10 @@ registration = ${ "registration" ~ WS ~ protection_status ~ &KB }
 // option name Style type combo default Normal var Solid var Normal var Risky\n
 // option name NalimovPath type string default c:\\n
 // option name Clear Hash type button\n
+//
+// Note: "One string will be sent for each parameter."
+// "Certain options have a fixed value for id, which means that the semantics of this option is fixed."
+// For Shogi those have prefix "USI_" rather than "UCI_".
 
 option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)? ~ &KB }
 
@@ -260,6 +264,7 @@ option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)?
         filename = { "filename" }
 
     option_vars = { min | max | default | var+ }
+        // `min` and `max` only make sense with type `spin`, but the grammar doesn't enforce this
         min = ${ "min" ~ WS ~ digits }
         max = ${ "max" ~ WS ~ digits }        
         default = ${ "default" ~ WS ~ option_vars_tokens  }    
@@ -287,7 +292,7 @@ option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)?
 
 info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
 
-    info_attr = {
+    info_attr = _{
         info_depth |
         info_seldepth |
         info_time | 
@@ -307,23 +312,25 @@ info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
 
     info_depth = ${ "depth" ~ WS ~ digits }
     info_seldepth = ${ "seldepth" ~ WS ~ digits }
-    info_time = ${ "time" ~ WS ~ digits }
+    info_time = ${ "time" ~ WS ~ millisecs }
     info_nodes = ${ "nodes" ~ WS ~ digits }
     info_currmove = ${ "currmove" ~ WS ~ one_move }
     info_currmovenum = ${ "currmovenum" ~ WS ~ digits }
     info_hashfull = ${ "hashfull" ~ WS ~ digits }
     info_nps = ${ "nps" ~ WS ~ digits }
     info_cpuload = ${ "cpuload" ~ WS ~ digits }    
-    info_pv = ${ "pv" ~ (WS ~ one_move)+ }
+    info_pv = ${ "pv" ~ WS ~ moves }
     info_multipv = ${ "multipv" ~ WS ~ digits }
-    info_refutation = ${ "refutation" ~ (WS ~ one_move)+ }
-    info_currline = ${ "currline" ~ (WS ~ digits)* ~ (WS ~ one_move)+ }
-    info_score = ${ "score" ~ (score_cp | score_mate) ~ (score_lowerbound | score_upperbound)+ }
+    info_refutation = ${ "refutation" ~ WS ~ moves }
+    // "currline: If cpunr is greater than 1, always send all k lines in k strings together."
+    // `cpunr` should then only occur at most once in each expression - I think
+    info_currline = ${ "currline" ~ WS ~ (digits ~ WS)? ~ moves }
+    info_score = ${ "score" ~ WS ~ (score_cp | score_mate) ~ (WS ~ score_lowerbound)? ~ (WS ~ score_upperbound)? }
 
-        score_cp = ${ WS ~ "cp" ~ WS ~ integer }
-        score_mate = ${ WS ~ "mate" ~ WS ~ integer }
-        score_lowerbound = ${ WS ~ "lowerbound" }
-        score_upperbound = ${ WS ~ "upperbound" }
+        score_cp = ${ "cp" ~ WS ~ integer }
+        score_mate = ${ "mate" ~ WS ~ integer }
+        score_lowerbound = { "lowerbound" }
+        score_upperbound = { "upperbound" }
 
     // consumes until EOL
     info_string = ${ "string" ~ WS ~ tokens }
@@ -341,7 +348,7 @@ tokens = @{ token ~ (WS ~ token)* }
 // digits is a contiguous sequence of ascii digits
 digits = @{ ASCII_DIGIT+ }
 
-millisecs = { sign? ~ digits }
+millisecs = { digits }
 integer = { sign? ~ digits }
 sign = { "+" | "-" }
 

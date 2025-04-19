@@ -76,15 +76,15 @@ pub enum EngineMessage {
         best_move: Move,
         ponder: Option<Move>,
     },
-    CopyProtection(RegisterState),
-    Register(RegisterState),
+    CopyProtection(StatusCheck),
+    Registration(StatusCheck),
     Option(UsiOptionType),
     Info(Vec<UsiInfo>),
 }
 
 /// Represents the copy protection or registration state.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub enum RegisterState {
+pub enum StatusCheck {
     /// Signifies the engine is checking the copy protection or registration.
     Checking,
 
@@ -93,6 +93,16 @@ pub enum RegisterState {
 
     /// Signifies error in copy protection or registratin validation.
     Error,
+}
+
+impl Display for StatusCheck {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            StatusCheck::Checking => write!(f, "checking"),
+            StatusCheck::Ok => write!(f, "ok"),
+            StatusCheck::Error => write!(f, "error"),
+        }
+    }
 }
 
 /// Time control settings (send by the `go` message).
@@ -123,7 +133,7 @@ pub enum UsiTimeControl {
         /// never used in Shogi. Instead, byoyomi is used.
         moves_to_go: Option<u8>,
 
-        /// (Shogidokoro) In milliseconds. Max allowed negative time after time's up. 
+        /// (Shogidokoro) In milliseconds. Max allowed negative time after time's up.
         /// Resets to 0 with every move. If surpassed, the game is lost.
         byoyomi: Option<Duration>,
     },
@@ -166,19 +176,20 @@ impl Default for UsiSearchControl {
     fn default() -> Self {
         UsiSearchControl {
             searchmoves: Vec::new(),
-            mate: None,             
-            depth: None,            
-            nodes: None,            
+            mate: None,
+            depth: None,
+            nodes: None,
         }
     }
 }
 
 impl UsiSearchControl {
-    pub fn is_active(&self) -> bool { // cannot be `pub const fn` because Vec `is_empty` is not yet stable
-        !self.searchmoves.is_empty() ||
-        self.mate.is_some() ||
-        self.depth.is_some() ||
-        self.nodes.is_some()
+    pub fn is_active(&self) -> bool {
+        // cannot be `pub const fn` because Vec `is_empty` is not yet stable
+        !self.searchmoves.is_empty()
+            || self.mate.is_some()
+            || self.depth.is_some()
+            || self.nodes.is_some()
     }
 }
 
@@ -243,6 +254,10 @@ pub enum UsiOptionType {
     },
 }
 
+// TODO: Review this.
+// Isn't it a bit weird to have the UsiInfo as a Vec<UsiInfo>
+// rather than as a struct with fields?
+
 /// Various info messages.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum UsiInfo {
@@ -285,7 +300,7 @@ pub enum UsiInfo {
     /// The `info currmovenum` message (current move number).
     CurrMoveNum(u16),
 
-    /// The `info hashfull` message (the occupancy of hashing tables in permills).
+    /// The `info hashfull` message (occupancy of hash tables in permills, from 0 to 1000).
     HashFull(u16),
 
     /// The `info nps` message (nodes per second).
@@ -451,7 +466,7 @@ impl Display for EngineMessage {
                 write!(f, "{}", s)
             }
             EngineMessage::CopyProtection(state) => write!(f, "copyprotection {}", *state),
-            EngineMessage::Register(state) => write!(f, "register {}", *state),
+            EngineMessage::Registration(state) => write!(f, "register {}", *state),
             EngineMessage::Option(option) => write!(f, "option {}", *option),
             EngineMessage::Info(info) => {
                 let info_str = info
@@ -462,12 +477,6 @@ impl Display for EngineMessage {
                 write!(f, "info {}", info_str)
             }
         }
-    }
-}
-
-impl Display for RegisterState {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "reg")
     }
 }
 

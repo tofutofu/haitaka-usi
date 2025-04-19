@@ -1,5 +1,5 @@
-use std::io::{self, Read, Write};
 use haitaka_usi::parser::*;
+use std::io::{self, Read, Write};
 
 fn main() {
     loop {
@@ -23,4 +23,3 @@ fn main() {
         println!("\nmsg='{}'", msg);
     }
 }
-
