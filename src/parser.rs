@@ -393,6 +393,22 @@ impl UsiMessage {
         None // unreachable!()
     }
 
+    fn parse_integer<T: FromStr + Debug>(pair: Pair<Rule>) -> Option<T>
+    where
+        <T as FromStr>::Err: Debug,
+    {
+        for sp in pair.into_inner() {
+            if let Rule::integer = sp.as_rule() {
+                let digits_str = spinstr!(sp); // Extract the str representation of the digits
+                match digits_str.parse::<T>() {
+                    Ok(value) => return Some(value),
+                    Err(err) => eprintln!("Failed to parse integer '{}': {:?}", digits_str, err),
+                }
+            }
+        }
+        None // unreachable!()
+    }
+
     // engine-to-gui
 
     pub fn parse_id(pair: Pair<Rule>) -> UsiMessage {
@@ -519,10 +535,10 @@ impl UsiMessage {
         for sp in pair.into_inner() {
             match sp.as_rule() {
                 Rule::score_cp => {
-                    cp = Some(spinstr!(sp).parse::<i32>().unwrap());
+                    cp = Self::parse_integer::<i32>(sp);
                 }
                 Rule::score_mate => {
-                    mate = Some(spinstr!(sp).parse::<i16>().unwrap());
+                    mate = Self::parse_integer::<i16>(sp);
                 }
                 Rule::score_lowerbound => {
                     lowerbound = Some(true);
