@@ -80,7 +80,6 @@ pub enum EngineMessage {
     Register(RegisterState),
     Option(UsiOptionType),
     Info(Vec<UsiInfo>),
-    // Unknown(String, Option<PestError<Rule>>),
 }
 
 /// Represents the copy protection or registration state.

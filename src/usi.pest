@@ -318,13 +318,13 @@ unknown = @{ (!NEWLINE ~ ANY)+ }
 // helpers 
 // 
 
-// a token is a continguous sequence of chars, but with no whitespace or newlines    
+// a token is a contiguous sequence of chars, but with no whitespace or newlines
 token = @{ (!(WHITESPACE | NEWLINE) ~ ANY)+ }
 
 // tokens is a sequence of white-space-separated tokens (but not allowing newlines)
 tokens = @{ token ~ (WS ~ token)* }
 
-// digits is a continguous sequence of ascii digits
+// digits is a contiguous sequence of ascii digits
 digits = @{ ASCII_DIGIT+ }
 
 millisecs = { sign? ~ digits }
