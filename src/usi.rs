@@ -119,16 +119,31 @@ pub enum UsiTimeControl {
         black_increment: Option<Duration>,
 
         /// The number of moves to go to the next time control. Only set if greater than 0.
-        /// If not set, and wtime and btime are set, then it's sudden death.
+        /// If not set, and wtime and btime are set, then it's sudden death. This option is
+        /// never used in Shogi. Instead, byoyomi is used.
         moves_to_go: Option<u8>,
-    },
 
-    /// (Shogidokoro) In milliseconds. Max allowed negative time. Resets to 0 with every move.
-    /// If surpassed, the game is lost.
-    Byoyomi(Option<Duration>),
+        /// (Shogidokoro) In milliseconds. Max allowed negative time after time's up. 
+        /// Resets to 0 with every move. If surpassed, the game is lost.
+        byoyomi: Option<Duration>,
+    },
 
     /// Specifies how much time exactly the engine should think about the move, in milliseconds.
     MoveTime(Duration),
+}
+
+impl UsiTimeControl {
+    /// Return a UsiTimeControl::TimeLeft instance with all fields set to None.
+    pub fn time_left() -> UsiTimeControl {
+        UsiTimeControl::TimeLeft {
+            white_time: None,
+            black_time: None,
+            white_increment: None,
+            black_increment: None,
+            moves_to_go: None,
+            byoyomi: None,
+        }
+    }
 }
 
 /// Search control settings (set by `go` message).
@@ -145,6 +160,26 @@ pub struct UsiSearchControl {
 
     /// Search this many nodes (positions).
     pub nodes: Option<u64>,
+}
+
+impl Default for UsiSearchControl {
+    fn default() -> Self {
+        UsiSearchControl {
+            searchmoves: Vec::new(),
+            mate: None,             
+            depth: None,            
+            nodes: None,            
+        }
+    }
+}
+
+impl UsiSearchControl {
+    pub fn is_active(&self) -> bool { // cannot be `pub const fn` because Vec `is_empty` is not yet stable
+        !self.searchmoves.is_empty() ||
+        self.mate.is_some() ||
+        self.depth.is_some() ||
+        self.nodes.is_some()
+    }
 }
 
 /// USI option type.

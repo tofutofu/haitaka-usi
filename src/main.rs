@@ -1,5 +1,5 @@
-use haitaka_usi::parser::*;
 use std::io::{self, Read, Write};
+use haitaka_usi::parser::*;
 
 fn main() {
     loop {
@@ -20,19 +20,7 @@ fn main() {
         let msg = parse_one(&input);
 
         println!("\n{:#?}", msg);
+        println!("\nmsg='{}'", msg);
     }
 }
 
-/*
-
->>> go depth 3
-Parsed successfully:
-[Pair { rule: go, span: Span { str: "go depth 3", start: 0, end: 10 },
-    inner: [Pair { rule: go_full, span: Span { str: "go depth 3", start: 0, end: 10 },
-        inner: [Pair { rule: go_search, span: Span { str: "depth 3", start: 3, end: 10 },
-            inner: [Pair { rule: depth, span: Span { str: "depth 3", start: 3, end: 10 },
-                inner: [Pair { rule: digits3, span: Span { str: "3", start: 9, end: 10 },
-                    inner: [Pair { rule: digit, span: Span { str: "3", start: 9, end: 10 },
-                        inner: [] }] }] }] }] }] }]
-
-*/

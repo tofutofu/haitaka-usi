@@ -1,4 +1,4 @@
-# haitaka-usi ハイタカ-USI
+# haitaka-usi ハイタカ-usi
 
 Haitaka-usi is a [Universal Shogi Interface (USI) protocol](http://hgm.nubati.net/usi.html) parser and serializer.
 

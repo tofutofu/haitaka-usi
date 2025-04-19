@@ -36,21 +36,34 @@
 // A more principled reason is that the USI spec (even though this is not a formal spec) 
 // doesn't specify any restrictions. The downside is that this does require the GUI or
 // engine to guard more carefully against possibly crazy input.
+//
+// The published specs are extremely vague about error conditions. For instance:
+// Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should it 
+// be an error? Should `debugon` and `de bugon` be parsed as `debug on`, or as garbage?
+// Since the spec talks about "tokens" (without defining those), it seems reasonable to interpret 
+// all keywords as "tokens" and to _require_ that all must be delimited either by white-space 
+// (including newlines) or by SOI (start of input) or EOI (end of input). In the grammar below, 
+// I have enforced this.
 
 WHITESPACE = _{ " " | "\t" }
 WS = _{ WHITESPACE+ }
-NL = _{ (WHITESPACE | NEWLINE) }
+NL = _{ WHITESPACE | NEWLINE }
 SEP = _{"/"}
 
+// boundary
+KB = _{ NL+ | EOI } 
+
 // start 
-start = _{ SOI ~ NL* ~ (line ~ NL+)+ ~ EOI }
+start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ EOI }
 
 // we need to allow trailing and ending garbage
 line = _{ garbage? ~ message ~ garbage? }
 
-garbage = _{ (!NEWLINE ~ !keyword ~ ANY)+ }
+//garbage = _{ !NEWLINE ~!start_of_command ~ ANY+ }
 
-keyword = _{ 
+garbage = _{ !start_of_command ~ ANY+ }
+
+start_of_command = _{ 
     "usi" | 
     "debug" | 
     "isready" | 
@@ -92,47 +105,49 @@ message = _{
     copyprotection | 
     registration | 
     option | 
-    info |
-    unknown
+    info
 }
 
 //
 // GUI to engine
 //
 
-usi = ${ "usi" }
+usi = ${ "usi" ~ &KB }
 
-debug = ${ "debug" ~ (WS ~ ("on" | "off"))? }
+debug = ${ "debug" ~ (WS ~ ("on" | "off"))? ~ &KB }
 
-isready = { "isready" }
+isready = { "isready" ~ &KB }
 
 setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
 
     // option_name and option_value are allowed to included whitespace
+    // `value` will consume until EOL
+    // if no value is found, then `name` may consume rest of line
     setoption_name = ${ setoption_token ~ (WS ~ setoption_token)* }
     setoption_token = _{ !("value") ~ token }
     setoption_value = ${ tokens }
 
 register = { register_later | register_with_name_and_code }
 
-    register_later = ${ "register" ~ WS ~ "later" }
+    register_later = ${ "register" ~ WS ~ "later" ~ &KB}
     register_with_name_and_code = ${ "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
 
+    // `code` consume until EOL
     register_name = ${ register_token ~ (WS ~ register_token)* }
     register_token = _{ !("code") ~ token }
     register_code = ${ tokens }
 
-usinewgame = { "usinewgame" }
+usinewgame = { "usinewgame" ~ &KB}
 
-stop = { "stop" }
+stop = { "stop" ~ &KB }
 
-quit = { "quit" }
+quit = { "quit" ~ &KB }
 
-ponderhit = { "ponderhit" }
+ponderhit = { "ponderhit" ~ &KB }
 
 // ln1g5/1r2S1k2/p2pppn2/2ps2p2/1p7/2P6/PPSPPPPLP/2G2K1pr/LN4G1b w BGSLPnp 62
 
-position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)? }
+position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)? ~ &KB }
 
     startpos = ${ "startpos" }
     sfenpos = ${ "sfen" ~ WS ~ sfen_board ~ WS ~ sfen_color ~ WS ~ sfen_hands ~ (WS ~ sfen_move_num)? }
@@ -168,7 +183,7 @@ position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ move
     file = { '1'..'9' }
     rank = { 'a'..'i' }
 
-go = ${ "go" ~ (WS ~ go_sub_cmd)* }
+go = ${ "go" ~ (WS ~ go_sub_cmd)* ~ &KB }
 
     go_sub_cmd = _{
         searchmoves |          
@@ -206,20 +221,21 @@ go = ${ "go" ~ (WS ~ go_sub_cmd)* }
 
 id = ${ "id" ~ WS ~ (id_name | id_author) }
 
+    // consume until EOL
     id_name = ${ "name" ~ WS ~ tokens }
     id_author = ${ "author" ~ WS ~ tokens }
 
-usiok = { "usiok" }
+usiok = { "usiok" ~ &KB }
 
-readyok = { "readyok" }
+readyok = { "readyok" ~ &KB }
 
-bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)? }
+bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)? ~ &KB }
 
     ponder_move = { "ponder" ~ WS ~ one_move }
 
-copyprotection = ${ "copyprotection" ~ WS ~ protection_status }
+copyprotection = ${ "copyprotection" ~ WS ~ protection_status ~ &KB }
 
-registration = ${ "registration" ~ WS ~ protection_status }
+registration = ${ "registration" ~ WS ~ protection_status ~ &KB }
 
     protection_status = { "checking" | "ok" | "error" }
 
@@ -230,7 +246,7 @@ registration = ${ "registration" ~ WS ~ protection_status }
 // option name NalimovPath type string default c:\\n
 // option name Clear Hash type button\n
 
-option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)? }
+option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)? ~ &KB }
 
     option_name = ${ "name" ~ WS ~ option_name_tokens }
     option_name_tokens = ${ !("type") ~ token ~ (WS ~ option_name_tokens)? }
@@ -246,9 +262,10 @@ option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)?
     option_vars = { min | max | default | var+ }
         min = ${ "min" ~ WS ~ digits }
         max = ${ "max" ~ WS ~ digits }        
-        default = ${ "default" ~ WS ~ option_vars_tokens  }        
+        default = ${ "default" ~ WS ~ option_vars_tokens  }    
+        // var allows any sequence of tokens, except the reserved words 'min', 'max', 'var' and 'default'    
         var = ${ "var" ~ WS ~ option_vars_tokens }
-        option_vars_tokens = { !("min" | "max" | "var") ~ token ~ (WS ~ option_vars_tokens)? }
+        option_vars_tokens = { !("min" | "max" | "var" | "default") ~ token ~ (WS ~ option_vars_tokens)? }
 
 // Info examples:
 //  info currmove e2e4 currmovenumber 1
@@ -268,7 +285,7 @@ option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)?
 //  info score cp 20  depth 3 nodes 423 time 15 pv f1c4 g8f6 b1c3
 //  info nps 41562
 
-info = ${ "info" ~ (WS ~ info_attr)+ }
+info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
 
     info_attr = {
         info_depth |
@@ -301,18 +318,15 @@ info = ${ "info" ~ (WS ~ info_attr)+ }
     info_multipv = ${ "multipv" ~ WS ~ digits }
     info_refutation = ${ "refutation" ~ (WS ~ one_move)+ }
     info_currline = ${ "currline" ~ (WS ~ digits)* ~ (WS ~ one_move)+ }
-    info_score = ${ "score" ~ (score_cp | score_mate) ~ ("lowerbound" | "upperbound") }
+    info_score = ${ "score" ~ (score_cp | score_mate) ~ (score_lowerbound | score_upperbound)+ }
 
         score_cp = ${ WS ~ "cp" ~ WS ~ integer }
         score_mate = ${ WS ~ "mate" ~ WS ~ integer }
+        score_lowerbound = ${ WS ~ "lowerbound" }
+        score_upperbound = ${ WS ~ "upperbound" }
 
+    // consumes until EOL
     info_string = ${ "string" ~ WS ~ tokens }
-
-//
-// garbage
-//
-
-unknown = @{ (!NEWLINE ~ ANY)+ }
 
 //
 // helpers 
