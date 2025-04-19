@@ -2,11 +2,11 @@
 
 use core::str::FromStr;
 // use chrono::Duration;
+use haitaka_types::Move;
+use pest::Parser; // trait
 use pest::error::Error;
 use pest::iterators::{Pair, Pairs};
-use pest::Parser; // trait
 use pest_derive::Parser; // procedural macro
-use haitaka_types::Move;
 
 use crate::usi::*;
 
@@ -15,7 +15,6 @@ use crate::usi::*;
 struct UsiParser;
 
 pub fn dbg(s: &str) {
-
     let pairs = UsiParser::parse(Rule::start, s).unwrap();
     println!("{:#?}", pairs);
 }
@@ -64,13 +63,12 @@ macro_rules! spanstr {
     };
 }
 
-/// Extract the string value of a PEST Span as str. 
+/// Extract the string value of a PEST Span as str.
 macro_rules! spinstr {
     ($sp:ident) => {
         $sp.as_span().as_str()
     };
 }
-
 
 fn parse_usi(
     s: &str,
@@ -91,7 +89,7 @@ fn parse_usi(
             Rule::quit => gui!(Quit),
             Rule::ponderhit => gui!(PonderHit),
             Rule::position => GuiMessage::parse_position(pair),
-            _ => UsiMessage::Unknown(spanstr!(pair), None)
+            _ => UsiMessage::Unknown(spanstr!(pair), None),
         };
 
         if let Some(msgs) = &mut messages {
@@ -104,10 +102,7 @@ fn parse_usi(
     Ok(None)
 }
 
-
-
 impl GuiMessage {
-
     pub fn parse_debug(pair: Pair<Rule>) -> UsiMessage {
         let on = !pair.as_span().as_str().trim_end().ends_with("off");
         UsiMessage::UsiGuiToEngine(GuiMessage::Debug(on))
@@ -127,7 +122,11 @@ impl GuiMessage {
                 _ => {}
             }
         }
-        let value = if value != String::default() { Some(value) } else { None };
+        let value = if value != String::default() {
+            Some(value)
+        } else {
+            None
+        };
         UsiMessage::UsiGuiToEngine(GuiMessage::SetOption { name, value })
     }
 
@@ -137,20 +136,26 @@ impl GuiMessage {
         let mut code: Option<String> = None;
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::register_later => { later = true; }
+                Rule::register_later => {
+                    later = true;
+                }
                 Rule::register_with_name_and_code => {
                     for spi in sp.into_inner() {
                         match spi.as_rule() {
-                            Rule::register_name => { name = Some(spanstr!(spi)); }
-                            Rule::register_code => { code = Some(spanstr!(spi)); }
-                            _ => unreachable!()
+                            Rule::register_name => {
+                                name = Some(spanstr!(spi));
+                            }
+                            Rule::register_code => {
+                                code = Some(spanstr!(spi));
+                            }
+                            _ => unreachable!(),
                         }
                     }
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
-        UsiMessage::UsiGuiToEngine(GuiMessage::Register { later, name, code})
+        UsiMessage::UsiGuiToEngine(GuiMessage::Register { later, name, code })
     }
 
     pub fn parse_position(pair: Pair<Rule>) -> UsiMessage {
@@ -159,19 +164,25 @@ impl GuiMessage {
         let mut moves: Option<Vec<Move>> = None;
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::startpos => { 
-                    assert!( sfen.is_none() );
-                    startpos = true; }
-                Rule::sfenpos => { 
-                    assert!( !startpos );
+                Rule::startpos => {
+                    assert!(sfen.is_none());
+                    startpos = true;
+                }
+                Rule::sfenpos => {
+                    assert!(!startpos);
                     sfen = Some(spanstr!(sp));
                 }
-                Rule::moves => { 
-                    moves = Some(Self::parse_moves(sp)); }
-                _ => unreachable!()
+                Rule::moves => {
+                    moves = Some(Self::parse_moves(sp));
+                }
+                _ => unreachable!(),
             }
         }
-        UsiMessage::UsiGuiToEngine(GuiMessage::Position { startpos, sfen, moves })
+        UsiMessage::UsiGuiToEngine(GuiMessage::Position {
+            startpos,
+            sfen,
+            moves,
+        })
     }
 
     fn parse_moves(pair: Pair<Rule>) -> Vec<Move> {
@@ -188,11 +199,7 @@ impl GuiMessage {
 
         moves
     }
-
-
 }
-
-
 
 /*
 
@@ -1083,7 +1090,7 @@ Unknown(
     "position sfen ln1g5/1r2S1k2/p2pppn2/2ps2p2/1p7/2P6/PPSPPPPLP/2G2K1pr/LN4G1b w B",
     None,
 )
->>> 
+>>>
 
 
 

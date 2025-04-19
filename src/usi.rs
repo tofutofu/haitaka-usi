@@ -1,9 +1,9 @@
 // usi.rs
 
-use std::fmt::{Display, Formatter, Result};
 use chrono::Duration;
-use pest::error::Error as PestError;
 use haitaka_types::Move;
+use pest::error::Error as PestError;
+use std::fmt::{Display, Formatter, Result};
 
 use crate::parser::Rule;
 
@@ -20,7 +20,7 @@ pub enum UsiMessage {
     UsiEngineToGui(EngineMessage),
 
     /// The Unknown Message (probably Lost in Translation)
-    Unknown(String, Option<PestError<Rule>>)
+    Unknown(String, Option<PestError<Rule>>),
 }
 
 /// Messages sent from the GUI to the engine.
@@ -29,7 +29,7 @@ pub enum GuiMessage {
     Usi,
     Debug(bool),
     IsReady,
-    Register{
+    Register {
         later: bool,
         name: Option<String>,
         code: Option<String>,
@@ -56,13 +56,12 @@ pub enum GuiMessage {
 /*
 
     "option name Nullmove type check default true\n"
-	"option name Selectivity type spin default 2 min 0 max 4\n"
-	"option name Style type combo default Normal var Solid var Normal var Risky\n"
-	"option name LearningFile type filename default /shogi/my-shogi-engine/learn.bin"
-	"option name ResetLearning type button\n"
-    
-*/
+    "option name Selectivity type spin default 2 min 0 max 4\n"
+    "option name Style type combo default Normal var Solid var Normal var Risky\n"
+    "option name LearningFile type filename default /shogi/my-shogi-engine/learn.bin"
+    "option name ResetLearning type button\n"
 
+*/
 
 /// Messages sent from the engine to the GUI.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -83,7 +82,6 @@ pub enum EngineMessage {
     Info(Vec<UsiInfo>),
     // Unknown(String, Option<PestError<Rule>>),
 }
-
 
 /// Represents the copy protection or registration state.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
@@ -131,7 +129,7 @@ pub enum UsiTimeControl {
     Byoyomi(Option<Duration>),
 
     /// Specifies how much time exactly the engine should think about the move, in milliseconds.
-    MoveTime(Duration)
+    MoveTime(Duration),
 }
 
 /// Search control settings (set by `go` message).
@@ -192,7 +190,7 @@ pub enum UsiOptionType {
     /// The option of type `button` (an action).
     Button {
         /// The name of the option.
-        name: String
+        name: String,
     },
 
     /// The option of type `string`.
@@ -209,10 +207,9 @@ pub enum UsiOptionType {
         name: String,
         default: Option<String>,
     },
-
 }
 
-/// Various info messages. 
+/// Various info messages.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum UsiInfo {
     /// The `info depth` message.
@@ -286,18 +283,21 @@ pub enum UsiInfo {
 
 impl Display for UsiMessage {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{}", match self {
-            UsiMessage::UsiGuiToEngine(msg) => format!("{}", msg),
-            UsiMessage::UsiEngineToGui(msg) => format!("{}", msg),
-            UsiMessage::Unknown(msg, opt_err) => {
-                if let Some(err) = opt_err {
-                    format!("ERROR msg='{}' error='{}'", msg, err)
-                } else {
-                    format!("unknown msg '{}'", msg)
+        write!(
+            f,
+            "{}",
+            match self {
+                UsiMessage::UsiGuiToEngine(msg) => format!("{}", msg),
+                UsiMessage::UsiEngineToGui(msg) => format!("{}", msg),
+                UsiMessage::Unknown(msg, opt_err) => {
+                    if let Some(err) = opt_err {
+                        format!("ERROR msg='{}' error='{}'", msg, err)
+                    } else {
+                        format!("unknown msg '{}'", msg)
+                    }
                 }
             }
-        }
-    )
+        )
     }
 }
 
@@ -325,7 +325,11 @@ impl Display for GuiMessage {
                     write!(f, "{}", s)
                 }
             }
-            GuiMessage::Position { startpos, sfen, moves } => {
+            GuiMessage::Position {
+                startpos,
+                sfen,
+                moves,
+            } => {
                 let mut s = String::from("position ");
                 if *startpos {
                     s += &format!("startpos");
@@ -335,7 +339,14 @@ impl Display for GuiMessage {
                     assert!(false, "GuiMessage::Position misses both startpos and sfen");
                 }
                 if let Some(moves) = moves {
-                    s += &format!("moves {}", moves.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" "));
+                    s += &format!(
+                        "moves {}",
+                        moves
+                            .iter()
+                            .map(|m| m.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
                 }
                 write!(f, "{}", s)
             }
@@ -350,7 +361,10 @@ impl Display for GuiMessage {
             GuiMessage::Stop => write!(f, "stop"),
             GuiMessage::PonderHit => write!(f, "ponderhit"),
             GuiMessage::Quit => write!(f, "quit"),
-            GuiMessage::Go { time_control, search_control } => {
+            GuiMessage::Go {
+                time_control,
+                search_control,
+            } => {
                 let mut s = String::from("go");
                 if let Some(tc) = time_control {
                     s += &format!(" {}", tc);
@@ -367,7 +381,7 @@ impl Display for GuiMessage {
 impl Display for UsiTimeControl {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
-            _ => write!(f, "")
+            _ => write!(f, ""),
         }
     }
 }
@@ -375,7 +389,7 @@ impl Display for UsiTimeControl {
 impl Display for UsiSearchControl {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
-            _ => write!(f, "")
+            _ => write!(f, ""),
         }
     }
 }
@@ -388,7 +402,8 @@ impl Display for EngineMessage {
                     write!(f, "id name {}", n)
                 } else if let Some(a) = author {
                     write!(f, "id author {}", a)
-                } else {  // reachable???
+                } else {
+                    // reachable???
                     write!(f, "id")
                 }
             }
@@ -405,7 +420,11 @@ impl Display for EngineMessage {
             EngineMessage::Register(state) => write!(f, "register {}", *state),
             EngineMessage::Option(option) => write!(f, "option {}", *option),
             EngineMessage::Info(info) => {
-                let info_str = info.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
+                let info_str = info
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 write!(f, "info {}", info_str)
             }
         }
@@ -430,7 +449,6 @@ impl Display for UsiInfo {
     }
 }
 
-
 /*
 impl Display for SFENPosition {
     fn fmt(&self, f: &mut Formatter) -> Result {
@@ -443,5 +461,3 @@ impl Display for SFENPosition {
     }
 }
 */
-
-
