@@ -1,0 +1,336 @@
+// USI - Universal Shogi Interface protocol
+//
+// References: 
+// - UCI protocol (https://backscattering.de/chess/uci/)
+// - The Universal Shogi Interface (http://hgm.nubati.net/usi.html)
+//
+// The protocol requires that
+// - All communication between engine and GUI is done by 7-bit ASCII text.
+// - All command strings sent or received must end with '\n'. 
+//   (Note: '\n' can be 0x0d or 0x0a0d or any combination depending on the OS). 
+// - Arbitrary white space between tokens is allowed.
+//   [Note: "white space" is not strictly defined in the spec. We limit it to only
+//   ascii space ' ' and ascii tab '\t'. Newlines are handled separately.]
+// - If the engine or the GUI receives an unknown command or token it should just ignore it 
+//   and try to parse the rest of the line. Examples: 
+//   `joho debug on\n` should switch the debug mode on given that joho is not defined, 
+//   `debug joho on\n` will be undefined however [will generate a parse error].
+// - If the engine receives a command which is unexpected, for example `stop` when 
+//   the engine is not calculating, it should also just ignore it.
+// - All options with fixed semantics start with the prefix "USI_". For instance, 
+//   the option which is named Hash in UCI is named USI_Hash in USI. 
+// 
+// Case-sensitivity
+// ----------------
+// The ref doesn't specify whether or not commands are case-sensitive. Stockfish only accepts 
+// lowercased commands. I will also assume that all commands must be in lower case; I believe
+// this is in the spirit of the spec. But all user-specified strings, names, options are
+// treated as case-sensitive -- unless the spec explicitly demands case-insensitive handling.
+//
+// Numbers
+// -------
+// I chose to not put any restrictions in the syntax on numbers. Checking that a value
+// makes sense should be done in the parser (or by the engine). One reason of not
+// restricting this on a too low level is that it gives the parser + engine more freedom
+// (e.g. the freedom to allow very long mate problems with over a 1000 moves as input).
+// A more principled reason is that the USI spec (even though this is not a formal spec) 
+// doesn't specify any restrictions. The downside is that this does require the GUI or
+// engine to guard more carefully against possibly crazy input.
+
+WHITESPACE = _{ " " | "\t" }
+WS = _{ WHITESPACE+ }
+NL = _{ (WHITESPACE | NEWLINE) }
+SEP = _{"/"}
+
+// start 
+start = _{ SOI ~ NL* ~ (line ~ NL+)+ ~ EOI }
+
+// we need to allow trailing and ending garbage
+line = _{ garbage? ~ message ~ garbage? }
+
+garbage = _{ (!NEWLINE ~ !keyword ~ ANY)+ }
+
+keyword = _{ 
+    "usi" | 
+    "debug" | 
+    "isready" | 
+    "setoption" | 
+    "register" | 
+    "usinewgame" | 
+    "stop" | 
+    "ponderhit" | 
+    "quit" | 
+    "position" |
+    "go" | 
+    "id" | 
+    "usiok" | 
+    "readyok" | 
+    "bestmove" |
+    "copyprotection" |
+    "registration" |
+    "option" |
+    "info"
+}
+
+// message
+message = _{
+    usi | 
+    debug | 
+    isready | 
+    setoption | 
+    register | 
+    usinewgame | 
+    stop | 
+    ponderhit | 
+    quit |
+    position | 
+    go |
+    id | 
+    usiok | 
+    readyok | 
+    bestmove | 
+    copyprotection | 
+    registration | 
+    option | 
+    info |
+    unknown
+}
+
+//
+// GUI to engine
+//
+
+usi = ${ "usi" }
+
+debug = ${ "debug" ~ (WS ~ ("on" | "off"))? }
+
+isready = { "isready" }
+
+setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
+
+    // option_name and option_value are allowed to included whitespace
+    setoption_name = ${ setoption_token ~ (WS ~ setoption_token)* }
+    setoption_token = _{ !("value") ~ token }
+    setoption_value = ${ tokens }
+
+register = { register_later | register_with_name_and_code }
+
+    register_later = ${ "register" ~ WS ~ "later" }
+    register_with_name_and_code = ${ "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
+
+    register_name = ${ register_token ~ (WS ~ register_token)* }
+    register_token = _{ !("code") ~ token }
+    register_code = ${ tokens }
+
+usinewgame = { "usinewgame" }
+
+stop = { "stop" }
+
+quit = { "quit" }
+
+ponderhit = { "ponderhit" }
+
+// ln1g5/1r2S1k2/p2pppn2/2ps2p2/1p7/2P6/PPSPPPPLP/2G2K1pr/LN4G1b w BGSLPnp 62
+
+position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)? }
+
+    startpos = ${ "startpos" }
+    sfenpos = ${ "sfen" ~ WS ~ sfen_board ~ WS ~ sfen_color ~ WS ~ sfen_hands ~ (WS ~ sfen_move_num)? }
+
+    sfen_board = ${ (sfen_rank ~ SEP){8} ~ sfen_rank }
+    sfen_color = ${ "w" | "b" }
+    sfen_hands = ${ sfen_black_hand ~ sfen_white_hand? | sfen_white_hand | sfen_empty_hand }
+    sfen_move_num = ${ digits }  
+
+    sfen_rank = ${ ((prom? ~ (white_piece | black_piece)) | file){1,9} }
+
+    sfen_black_hand = ${ (npieces? ~ black_hand_piece){1,6} }
+    sfen_white_hand = ${ (npieces? ~ white_hand_piece){1,6} }
+    sfen_empty_hand = { "-" }
+
+    prom = { "+" }
+    white_piece = { "k" | "r"  | "b" | "g" | "s" | "n"  | "l"  | "p" }
+    black_piece = { "K" | "R"  | "B" | "G" | "S" | "N"  | "L"  | "P" }
+    white_hand_piece = { "r"  | "b" | "s" | "n"  | "l"  | "p" }
+    black_hand_piece = { "R"  | "B" | "S" | "N"  | "L"  | "P" }
+
+    // "1" should really not be used, but I'll allow it
+    npieces = { "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | 
+                "10" | "11" | "12" | "13" | "14" | "15" | "16" | "17" | "18" }
+
+    moves = ${ one_move ~ (WS ~ one_move)* }
+
+    one_move = { drop | board_move }
+    drop = ${ black_piece ~ "*" ~ square }
+    board_move = ${ square ~ square ~ "+"? }
+
+    square = ${ file ~ rank }
+    file = { '1'..'9' }
+    rank = { 'a'..'i' }
+
+go = ${ "go" ~ (WS ~ go_sub_cmd)* }
+
+    go_sub_cmd = _{
+        searchmoves |          
+        ponder |
+        movetime |
+        byoyomi |
+        movestogo |
+        wtime |
+        btime |
+        winc |
+        binc |
+        depth |
+        nodes | 
+        mate |
+        infinite
+    }
+
+    searchmoves = ${ "searchmoves" ~ WS ~ moves}
+    ponder = { "ponder" }
+    movetime = ${ "movetime" ~ WS ~ millisecs }
+    byoyomi = ${ "byoyomi" ~ WS ~ millisecs }
+    wtime = ${ "wtime" ~ WS ~ millisecs }
+    btime = ${ "btime" ~ WS ~ millisecs }
+    winc = ${ "winc" ~ WS ~ millisecs }
+    binc = ${ "binc" ~ WS ~ millisecs }
+    movestogo = ${ "movestogo" ~ WS ~ digits }
+    depth = ${ "depth" ~ WS ~ digits }
+    nodes = ${ "nodes" ~ WS ~ digits }
+    mate = ${ "mate" ~ WS ~ digits }
+    infinite = { "infinite" }
+
+//
+// engine to GUI
+//
+
+id = ${ "id" ~ WS ~ (id_name | id_author) }
+
+    id_name = ${ "name" ~ WS ~ tokens }
+    id_author = ${ "author" ~ WS ~ tokens }
+
+usiok = { "usiok" }
+
+readyok = { "readyok" }
+
+bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)? }
+
+    ponder_move = { "ponder" ~ WS ~ one_move }
+
+copyprotection = ${ "copyprotection" ~ WS ~ protection_status }
+
+registration = ${ "registration" ~ WS ~ protection_status }
+
+    protection_status = { "checking" | "ok" | "error" }
+
+// Option examples:
+// option name Nullmove type check default true\n
+// option name Selectivity type spin default 2 min 0 max 4\n
+// option name Style type combo default Normal var Solid var Normal var Risky\n
+// option name NalimovPath type string default c:\\n
+// option name Clear Hash type button\n
+
+option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)? }
+
+    option_name = ${ "name" ~ WS ~ option_name_tokens }
+    option_name_tokens = ${ !("type") ~ token ~ (WS ~ option_name_tokens)? }
+
+    option_type = ${ "type" ~ WS ~ (check | spin | combo | string | button | filename) }
+        check = { "check" }
+        spin = { "spin" }
+        combo = { "combo" }
+        string = { "string" }
+        button = { "button" }
+        filename = { "filename" }
+
+    option_vars = { min | max | default | var+ }
+        min = ${ "min" ~ WS ~ digits }
+        max = ${ "max" ~ WS ~ digits }        
+        default = ${ "default" ~ WS ~ option_vars_tokens  }        
+        var = ${ "var" ~ WS ~ option_vars_tokens }
+        option_vars_tokens = { !("min" | "max" | "var") ~ token ~ (WS ~ option_vars_tokens)? }
+
+// Info examples:
+//  info currmove e2e4 currmovenumber 1
+// 	info depth 12 nodes 123456 nps 100000
+//
+// All infos belonging to the pv should be sent together, e.g.
+//  info depth 2 score cp 214 time 1242 nodes 2124 nps 34928 pv 2g2f 8c8d 2f2e 8d8e
+//
+//  info depth 1 seldepth 0
+//  info score cp 13  depth 1 nodes 13 time 15 pv f1b5
+//  info depth 2 seldepth 2
+//  info nps 15937
+//  info score cp 14  depth 2 nodes 255 time 15 pv f1c4 f8c5
+//  info depth 2 seldepth 7 nodes 255
+//  info depth 3 seldepth 7
+//  info nps 26437
+//  info score cp 20  depth 3 nodes 423 time 15 pv f1c4 g8f6 b1c3
+//  info nps 41562
+
+info = ${ "info" ~ (WS ~ info_attr)+ }
+
+    info_attr = {
+        info_depth |
+        info_seldepth |
+        info_time | 
+        info_nodes | 
+        info_currmovenum | 
+        info_currmove | 
+        info_hashfull | 
+        info_nps |
+        info_cpuload | 
+        info_pv | 
+        info_multipv | 
+        info_refutation | 
+        info_currline |
+        info_score |
+        info_string
+    }
+
+    info_depth = ${ "depth" ~ WS ~ digits }
+    info_seldepth = ${ "seldepth" ~ WS ~ digits }
+    info_time = ${ "time" ~ WS ~ digits }
+    info_nodes = ${ "nodes" ~ WS ~ digits }
+    info_currmove = ${ "currmove" ~ WS ~ one_move }
+    info_currmovenum = ${ "currmovenum" ~ WS ~ digits }
+    info_hashfull = ${ "hashfull" ~ WS ~ digits }
+    info_nps = ${ "nps" ~ WS ~ digits }
+    info_cpuload = ${ "cpuload" ~ WS ~ digits }    
+    info_pv = ${ "pv" ~ (WS ~ one_move)+ }
+    info_multipv = ${ "multipv" ~ WS ~ digits }
+    info_refutation = ${ "refutation" ~ (WS ~ one_move)+ }
+    info_currline = ${ "currline" ~ (WS ~ digits)* ~ (WS ~ one_move)+ }
+    info_score = ${ "score" ~ (score_cp | score_mate) ~ ("lowerbound" | "upperbound") }
+
+        score_cp = ${ WS ~ "cp" ~ WS ~ integer }
+        score_mate = ${ WS ~ "mate" ~ WS ~ integer }
+
+    info_string = ${ "string" ~ WS ~ tokens }
+
+//
+// garbage
+//
+
+unknown = @{ (!NEWLINE ~ ANY)+ }
+
+//
+// helpers 
+// 
+
+// a token is a continguous sequence of chars, but with no whitespace or newlines    
+token = @{ (!(WHITESPACE | NEWLINE) ~ ANY)+ }
+
+// tokens is a sequence of white-space-separated tokens (but not allowing newlines)
+tokens = @{ token ~ (WS ~ token)* }
+
+// digits is a continguous sequence of ascii digits
+digits = @{ ASCII_DIGIT+ }
+
+millisecs = { sign? ~ digits }
+integer = { sign? ~ digits }
+sign = { "+" | "-" }
+
+
+
+

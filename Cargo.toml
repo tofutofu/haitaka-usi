@@ -1,0 +1,11 @@
+[package]
+name = "haitaka_usi"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.8"
+pest = "2.8"
+pest_derive = "2.8"
+chrono = "0.4"
+haitaka-types = "0.1.2"
