@@ -130,7 +130,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96929af898a2d3bbb90b4fa396af543bfab1b6841c3c7da728dfd4ab7f8eae1"
 
 [[package]]
-name = "haitaka_usi"
+name = "haitaka-usi"
 version = "0.1.0"
 dependencies = [
  "chrono",
