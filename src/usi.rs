@@ -8,18 +8,19 @@ use core::fmt::{self, Display, Formatter, Result};
 
 use crate::parser::Rule;
 
-/// UsiMessageError type. 
+/*
+/// UsiMessageError type.
 #[derive(Debug)]
 pub struct UsiMessageError(String);
 
 impl fmt::Display for UsiMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result {
         write!(f, "{}", self.0)
-    }    
+    }
 }
 
-impl core::error::Error for UsiMessageError {
-}
+impl core::error::Error for UsiMessageError {}
+*/
 
 /// A vector of UsiMessage instances.
 pub type UsiMessageList = Vec<UsiMessage>;
@@ -118,11 +119,11 @@ impl Display for GuiMessage {
             } => {
                 let mut s = String::from("position ");
                 if *startpos {
-                    s += &format!("startpos");
+                    s += "startpos";
                 } else if let Some(sfen) = sfen {
                     s += &format!("sfen {}", sfen);
                 } else {
-                    eprintln!("The `position` message requires either a `startpos` or a `sfen`.");
+                    // eprintln!("The `position` message requires either a `startpos` or a `sfen`.");
                     return Err(fmt::Error);
                 }
                 if let Some(moves) = moves {
@@ -193,7 +194,9 @@ impl Display for EngineMessage {
                 } else if let Some(a) = author {
                     write!(f, "id author {}", a)
                 } else {
-                    eprintln!("The `id` message requires either a `name` or an `author` (or both).");
+                    // eprintln!(
+                    //    "The `id` message requires either a `name` or an `author` (or both)."
+                    //);
                     return Err(fmt::Error);
                 }
             }
@@ -260,7 +263,7 @@ pub enum UsiTimeControl {
 
 impl UsiTimeControl {
     /// Return a UsiTimeControl::TimeLeft instance with all fields set to None.
-    /// 
+    ///
     /// This is a convenience method used in parsing.
     pub fn time_left() -> UsiTimeControl {
         UsiTimeControl::TimeLeft {
@@ -280,40 +283,41 @@ impl Display for UsiTimeControl {
             UsiTimeControl::Ponder => write!(f, "ponder"),
             UsiTimeControl::Infinite => write!(f, "infinite"),
             UsiTimeControl::MoveTime(x) => write!(f, "movetime {}", x.num_milliseconds()),
-            UsiTimeControl::TimeLeft { 
-                white_time, 
-                black_time, 
-                white_increment, 
-                black_increment, 
-                moves_to_go, 
-                byoyomi } => {
-                    let mut s = String::default();
-                    if let Some(wtime) = white_time {
-                        s += &format!(" wtime {}", wtime.num_milliseconds());
-                    }
-                    if let Some(btime) = black_time {
-                        s += &format!(" btime {}", btime.num_milliseconds());
-                    }
-                    if let Some(winc) = white_increment {
-                        s += &format!(" winc {}", winc.num_milliseconds());
-                    }
-                    if let Some(binc) = black_increment {
-                        s += &format!(" binc {}", binc.num_milliseconds());
-                    }
-                    if let Some(mtg) = moves_to_go {
-                        s += &format!(" movestogo {}", mtg);
-                    }
-                    if let Some(byo) = byoyomi {
-                        s += &format!(" byoyomi {}", byo.num_milliseconds());
-                    }
-                    write!(f, "{}", s.trim())
+            UsiTimeControl::TimeLeft {
+                white_time,
+                black_time,
+                white_increment,
+                black_increment,
+                moves_to_go,
+                byoyomi,
+            } => {
+                let mut s = String::default();
+                if let Some(wtime) = white_time {
+                    s += &format!(" wtime {}", wtime.num_milliseconds());
+                }
+                if let Some(btime) = black_time {
+                    s += &format!(" btime {}", btime.num_milliseconds());
+                }
+                if let Some(winc) = white_increment {
+                    s += &format!(" winc {}", winc.num_milliseconds());
+                }
+                if let Some(binc) = black_increment {
+                    s += &format!(" binc {}", binc.num_milliseconds());
+                }
+                if let Some(mtg) = moves_to_go {
+                    s += &format!(" movestogo {}", mtg);
+                }
+                if let Some(byo) = byoyomi {
+                    s += &format!(" byoyomi {}", byo.num_milliseconds());
+                }
+                write!(f, "{}", s.trim())
             }
         }
     }
 }
 
 /// Search control settings (set by `go` message).
-#[derive(Clone, Eq, PartialEq, Debug, Hash)]
+#[derive(Clone, Default, Eq, PartialEq, Debug, Hash)]
 pub struct UsiSearchControl {
     /// Limit the search to these moves.
     pub searchmoves: Vec<Move>,
@@ -326,17 +330,6 @@ pub struct UsiSearchControl {
 
     /// Search this many nodes (positions).
     pub nodes: Option<u64>,
-}
-
-impl Default for UsiSearchControl {
-    fn default() -> Self {
-        UsiSearchControl {
-            searchmoves: Vec::new(),
-            mate: None,
-            depth: None,
-            nodes: None,
-        }
-    }
 }
 
 impl UsiSearchControl {
@@ -363,12 +356,12 @@ impl Display for UsiSearchControl {
             s += &format!(" nodes {}", nodes);
         }
         if !self.searchmoves.is_empty() {
-            let moves_str = 
-                self.searchmoves
-                    .iter()
-                    .map(|m| m.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+            let moves_str = self
+                .searchmoves
+                .iter()
+                .map(|m| m.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
             s += &format!(" searchmove {}", moves_str);
         }
         write!(f, "{}", s)
@@ -469,7 +462,12 @@ impl Display for UsiOptionType {
                     write!(f, "option name {} type check", name)
                 }
             }
-            UsiOptionType::Spin { name, default, min, max } => {
+            UsiOptionType::Spin {
+                name,
+                default,
+                min,
+                max,
+            } => {
                 let mut s = format!("option name {} type spin", name);
                 if let Some(default) = default {
                     s += &format!(" default {}", default);
@@ -578,9 +576,6 @@ pub enum UsiInfo {
         /// The line being calculated.
         line: Vec<Move>,
     },
-
-    /// Any other info line in the format `(name, value)`.
-    Any(String, String),
 }
 
 impl Display for UsiInfo {
@@ -591,11 +586,20 @@ impl Display for UsiInfo {
             UsiInfo::Time(time) => write!(f, "time {}", time.num_milliseconds()),
             UsiInfo::Nodes(nodes) => write!(f, "nodes {}", nodes),
             UsiInfo::Pv(pv) => {
-                let moves = pv.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                let moves = pv
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 write!(f, "pv {}", moves)
             }
             UsiInfo::MultiPv(multipv) => write!(f, "multipv {}", multipv),
-            UsiInfo::Score { cp, mate, lowerbound, upperbound } => {
+            UsiInfo::Score {
+                cp,
+                mate,
+                lowerbound,
+                upperbound,
+            } => {
                 let mut s = String::new();
                 if let Some(cp) = cp {
                     s += &format!("cp {}", cp);
@@ -622,19 +626,25 @@ impl Display for UsiInfo {
             UsiInfo::CpuLoad(cpuload) => write!(f, "cpuload {}", cpuload),
             UsiInfo::String(string) => write!(f, "string {}", string),
             UsiInfo::Refutation(refutation) => {
-                let moves = refutation.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                let moves = refutation
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 write!(f, "refutation {}", moves)
             }
             UsiInfo::CurrLine { cpu_nr, line } => {
-                let moves = line.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                let moves = line
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 if let Some(cpu_nr) = cpu_nr {
                     write!(f, "currline {} {}", cpu_nr, moves)
                 } else {
                     write!(f, "currline {}", moves)
                 }
             }
-            UsiInfo::Any(name, value) => write!(f, "{} {}", name, value),
         }
     }
 }
-

@@ -4,10 +4,10 @@ use chrono::Duration;
 use core::str::FromStr;
 use haitaka_types::Move;
 use pest::Parser; // trait
-use pest::error::Error;
+use pest::error::Error as PestError;
 use pest::iterators::{Pair, Pairs};
-use pest_derive::Parser;
-use std::fmt::Debug; // procedural macro
+use pest_derive::Parser; // proc macro
+use std::fmt::Debug;
 
 use crate::usi::*;
 
@@ -31,7 +31,8 @@ pub fn parse(s: &str) -> UsiMessageList {
     messages
 }
 
-pub fn try_parse(s: &str) -> Result<UsiMessageList, Error<Rule>> {
+#[allow(clippy::result_large_err)]
+pub fn try_parse(s: &str) -> Result<UsiMessageList, PestError<Rule>> {
     let mut messages = UsiMessageList::new();
     parse_usi(s, Rule::start, Some(&mut messages))?;
 
@@ -50,8 +51,14 @@ pub fn parse_one(s: &str) -> UsiMessage {
         return msg;
     }
 
-    return UsiMessage::Unknown(String::new(), None);
+    UsiMessage::Unknown(String::new(), None)
 }
+
+// Some macro_rules providing a bit a syntactic sugar for
+// ```
+//    Just a spoonful of sugar helps the medicine go down
+//    In a most delightful way
+// ```
 
 /// Expand a GuiMessage variant into it's full name.
 macro_rules! gui {
@@ -83,16 +90,36 @@ macro_rules! spinstr {
     };
 }
 
+/// Convert Some("<empty>") into Some(""). Used in parsing `option ... default <empty>`.
+macro_rules! convert_empty {
+    ($opt_str:ident) => {
+        if let Some(ref s) = $opt_str {
+            // `ref` ensures s is only borrowed, so we can use `$opt_str` in the else-clause
+            if s.eq_ignore_ascii_case("<empty>") {
+                Some(String::from(""))
+            } else {
+                $opt_str
+            }
+        } else {
+            None
+        }
+    };
+}
+
+// parse_usi is the internal work-horse
+#[allow(clippy::result_large_err)]
 fn parse_usi(
     s: &str,
     rule: Rule,
     mut messages: Option<&mut UsiMessageList>,
-) -> Result<Option<UsiMessage>, Error<Rule>> {
+) -> Result<Option<UsiMessage>, PestError<Rule>> {
     let pairs: Pairs<Rule> = UsiParser::parse(rule, s)?;
 
     for pair in pairs {
         let msg = match pair.as_rule() {
+            //
             // gui-to-engine
+            //
             Rule::usi => gui!(Usi),
             Rule::debug => UsiMessage::parse_debug(pair),
             Rule::isready => gui!(IsReady),
@@ -104,7 +131,9 @@ fn parse_usi(
             Rule::ponderhit => gui!(PonderHit),
             Rule::position => UsiMessage::parse_position(pair),
             Rule::go => UsiMessage::parse_go(pair),
+            //
             // engine-to-gui
+            //
             Rule::id => UsiMessage::parse_id(pair),
             Rule::usiok => engine!(UsiOk),
             Rule::readyok => engine!(ReadyOk),
@@ -113,6 +142,9 @@ fn parse_usi(
             Rule::registration => UsiMessage::parse_registration(pair),
             Rule::option => UsiMessage::parse_option(pair),
             Rule::info => UsiMessage::parse_info(pair),
+            //
+            // lost-in-translation
+            //
             _ => UsiMessage::Unknown(spanstr!(pair), None),
         };
 
@@ -130,34 +162,29 @@ impl UsiMessage {
     //
     // gui-to-engine
     //
-    pub fn parse_debug(pair: Pair<Rule>) -> UsiMessage {
-        let on = !pair.as_span().as_str().trim_end().ends_with("off");
+    fn parse_debug(pair: Pair<Rule>) -> UsiMessage {
+        let on = !spanstr!(pair).ends_with("off");
         UsiMessage::UsiGuiToEngine(GuiMessage::Debug(on))
     }
 
-    pub fn parse_setoption(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_setoption(pair: Pair<Rule>) -> UsiMessage {
         let mut name: String = String::default();
-        let mut value: String = String::default();
+        let mut value: Option<String> = None;
         for sp in pair.into_inner() {
             match sp.as_rule() {
                 Rule::setoption_name => {
                     name = spanstr!(sp);
                 }
                 Rule::setoption_value => {
-                    value = spanstr!(sp);
+                    value = Some(spanstr!(sp));
                 }
                 _ => {}
             }
         }
-        let value = if value != String::default() {
-            Some(value)
-        } else {
-            None
-        };
         UsiMessage::UsiGuiToEngine(GuiMessage::SetOption { name, value })
     }
 
-    pub fn parse_register(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_register(pair: Pair<Rule>) -> UsiMessage {
         let mut later: bool = false;
         let mut name: Option<String> = None;
         let mut code: Option<String> = None;
@@ -185,7 +212,7 @@ impl UsiMessage {
         UsiMessage::UsiGuiToEngine(GuiMessage::Register { later, name, code })
     }
 
-    pub fn parse_position(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_position(pair: Pair<Rule>) -> UsiMessage {
         let mut startpos: bool = false;
         let mut sfen: Option<String> = None;
         let mut moves: Option<Vec<Move>> = None;
@@ -258,7 +285,7 @@ impl UsiMessage {
         unreachable!();
     }
 
-    pub fn parse_go(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_go(pair: Pair<Rule>) -> UsiMessage {
         let msg: String = spanstr!(pair);
 
         let mut time_control: Option<UsiTimeControl> = None;
@@ -411,7 +438,7 @@ impl UsiMessage {
 
     // engine-to-gui
 
-    pub fn parse_id(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_id(pair: Pair<Rule>) -> UsiMessage {
         let mut name: Option<String> = None;
         let mut author: Option<String> = None;
 
@@ -430,7 +457,7 @@ impl UsiMessage {
         UsiMessage::UsiEngineToGui(EngineMessage::Id { name, author })
     }
 
-    pub fn parse_bestmove(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_bestmove(pair: Pair<Rule>) -> UsiMessage {
         let mut best_move: Move = Move::from_str("1a1a").unwrap(); // an invalid default move
         let mut ponder: Option<Move> = None;
 
@@ -449,12 +476,12 @@ impl UsiMessage {
         UsiMessage::UsiEngineToGui(EngineMessage::BestMove { best_move, ponder })
     }
 
-    pub fn parse_copyprotection(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_copyprotection(pair: Pair<Rule>) -> UsiMessage {
         let state = Self::parse_status_check(pair);
         UsiMessage::UsiEngineToGui(EngineMessage::CopyProtection(state))
     }
 
-    pub fn parse_registration(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_registration(pair: Pair<Rule>) -> UsiMessage {
         let state = Self::parse_status_check(pair);
         UsiMessage::UsiEngineToGui(EngineMessage::Registration(state))
     }
@@ -473,11 +500,108 @@ impl UsiMessage {
         unreachable!()
     }
 
-    pub fn parse_option(_pair: Pair<Rule>) -> UsiMessage {
-        UsiMessage::Unknown("option".to_string(), None)
+    fn parse_option(pair: Pair<Rule>) -> UsiMessage {
+        let mut name: String = String::default();
+        let mut option_type: Option<Pair<Rule>> = None;
+        let mut min: Option<i64> = None;
+        let mut max: Option<i64> = None;
+        let mut default: Option<String> = None;
+        let mut var: Vec<String> = Vec::<String>::new();
+
+        for sp in pair.into_inner() {
+            match sp.as_rule() {
+                Rule::option_name => name = spanstr!(sp),
+                Rule::option_type => {
+                    for spi in sp.into_inner() {
+                        match spi.as_rule() {
+                            Rule::check |  // bool
+                            Rule::spin |   // u64
+                            Rule::combo |  // String
+                            Rule::string | // String
+                            Rule::button |
+                            Rule::filename =>
+                                option_type = Some(spi),
+                            _ => unreachable!()
+                        }
+                    }
+                }
+                Rule::option_vars => {
+                    for spi in sp.into_inner() {
+                        match spi.as_rule() {
+                            Rule::min => min = Self::parse_integer::<i64>(spi),
+                            Rule::max => max = Self::parse_integer::<i64>(spi),
+                            Rule::default => default = Some(spanstr!(spi)),
+                            Rule::var => var.push(spanstr!(spi)),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        debug_assert!(option_type.is_some());
+
+        let usi_option = match option_type.unwrap().as_rule() {
+            Rule::check => {
+                let default = default
+                    .as_deref()
+                    .and_then(|val| match val.to_ascii_lowercase().as_str() {
+                        "true" => Some(true),
+                        "false" => Some(false),
+                        _ => {
+                            eprintln!(
+                                "Failed to parse `default` of `option name {} check default {}` as boolean. Setting default to None.",
+                                name, val);
+                            None
+                        },
+                    });
+
+                UsiOptionType::Check { name, default }
+            }
+            Rule::spin => {
+                let default = match default {
+                    Some(ref val) => match val.parse::<i64>() {
+                        Ok(parsed) => Some(parsed),
+                        Err(_) => {
+                            eprintln!(
+                                "Failed to parse `default` of `option name {} spin default {}` as i64. Setting default to None.",
+                                name, val
+                            );
+                            None
+                        }
+                    },
+                    None => None,
+                };
+
+                UsiOptionType::Spin {
+                    name,
+                    min,
+                    max,
+                    default,
+                }
+            }
+            Rule::combo => UsiOptionType::Combo {
+                name,
+                default: convert_empty!(default),
+                var,
+            },
+            Rule::string => UsiOptionType::String {
+                name,
+                default: convert_empty!(default),
+            },
+            Rule::button => UsiOptionType::Button { name },
+            Rule::filename => UsiOptionType::Filename {
+                name,
+                default: convert_empty!(default),
+            },
+            _ => unreachable!(),
+        };
+
+        UsiMessage::UsiEngineToGui(EngineMessage::Option(usi_option))
     }
 
-    pub fn parse_info(pair: Pair<Rule>) -> UsiMessage {
+    fn parse_info(pair: Pair<Rule>) -> UsiMessage {
         let mut v: Vec<UsiInfo> = Vec::<UsiInfo>::new();
         for sp in pair.into_inner() {
             let info: UsiInfo = match sp.as_rule() {

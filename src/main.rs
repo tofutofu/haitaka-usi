@@ -15,11 +15,18 @@ fn main() {
             break;
         }
 
+        println!("Input: {:?}", input);
+        println!("Debug:");
         dbg(&input);
+        println!();
 
-        let msg = parse_one(&input);
+        let ml = parse(&input);
 
-        println!("\n{:#?}", msg);
-        println!("\nmsg='{}'", msg);
+        //println!("\n{:#?}", msg);
+        //println!("\nmsg='{}'", msg);
+
+        for (i, m) in ml.iter().enumerate() {
+            println!("[{}] '{}'", i, m);
+        }
     }
 }
