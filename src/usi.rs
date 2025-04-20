@@ -260,6 +260,8 @@ pub enum UsiTimeControl {
 
 impl UsiTimeControl {
     /// Return a UsiTimeControl::TimeLeft instance with all fields set to None.
+    /// 
+    /// This is a convenience method used in parsing.
     pub fn time_left() -> UsiTimeControl {
         UsiTimeControl::TimeLeft {
             white_time: None,
@@ -310,9 +312,6 @@ impl Display for UsiTimeControl {
     }
 }
 
-
-
-
 /// Search control settings (set by `go` message).
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub struct UsiSearchControl {
@@ -341,8 +340,9 @@ impl Default for UsiSearchControl {
 }
 
 impl UsiSearchControl {
+    /// Returns true iff searchmoves is not empty or any of the optional fields are set.
     pub fn is_active(&self) -> bool {
-        // cannot be `pub const fn` because Vec `is_empty` is not yet stable
+        // cannot be `pub const fn` because `Vec::is_empty` is not yet stable
         !self.searchmoves.is_empty()
             || self.mate.is_some()
             || self.depth.is_some()
@@ -352,9 +352,26 @@ impl UsiSearchControl {
 
 impl Display for UsiSearchControl {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        match self {
-            _ => write!(f, ""),
+        let mut s = String::default();
+        if let Some(depth) = self.depth {
+            s += &format!(" depth {}", depth);
         }
+        if let Some(mate) = self.mate {
+            s += &format!(" mate {}", mate);
+        }
+        if let Some(nodes) = self.nodes {
+            s += &format!(" nodes {}", nodes);
+        }
+        if !self.searchmoves.is_empty() {
+            let moves_str = 
+                self.searchmoves
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            s += &format!(" searchmove {}", moves_str);
+        }
+        write!(f, "{}", s)
     }
 }
 
@@ -380,8 +397,6 @@ impl Display for StatusCheck {
         }
     }
 }
-
-
 
 /// USI option type.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -444,9 +459,59 @@ pub enum UsiOptionType {
     },
 }
 
-// TODO: Review this.
-// Isn't it a bit weird to have the UsiInfo as a Vec<UsiInfo>
-// rather than as a struct with fields?
+impl Display for UsiOptionType {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            UsiOptionType::Check { name, default } => {
+                if let Some(default) = default {
+                    write!(f, "option name {} type check default {}", name, default)
+                } else {
+                    write!(f, "option name {} type check", name)
+                }
+            }
+            UsiOptionType::Spin { name, default, min, max } => {
+                let mut s = format!("option name {} type spin", name);
+                if let Some(default) = default {
+                    s += &format!(" default {}", default);
+                }
+                if let Some(min) = min {
+                    s += &format!(" min {}", min);
+                }
+                if let Some(max) = max {
+                    s += &format!(" max {}", max);
+                }
+                write!(f, "{}", s)
+            }
+            UsiOptionType::Combo { name, default, var } => {
+                let mut s = format!("option name {} type combo", name);
+                if let Some(default) = default {
+                    s += &format!(" default {}", default);
+                }
+                for v in var {
+                    s += &format!(" var {}", v);
+                }
+                write!(f, "{}", s)
+            }
+            UsiOptionType::Button { name } => {
+                write!(f, "option name {} type button", name)
+            }
+            UsiOptionType::String { name, default } => {
+                if let Some(default) = default {
+                    write!(f, "option name {} type string default {}", name, default)
+                } else {
+                    write!(f, "option name {} type string", name)
+                }
+            }
+            UsiOptionType::Filename { name, default } => {
+                if let Some(default) = default {
+                    write!(f, "option name {} type filename default {}", name, default)
+                } else {
+                    write!(f, "option name {} type filename", name)
+                }
+            }
+        }
+    }
+}
 
 /// Various info messages.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -518,33 +583,58 @@ pub enum UsiInfo {
     Any(String, String),
 }
 
-
-
-
-
-
-
-impl Display for UsiOptionType {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "option")
-    }
-}
-
 impl Display for UsiInfo {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "info")
-    }
-}
-
-/*
-impl Display for SFENPosition {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        if self.moves.len() > 0 {
-            let moves_str = self.moves.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
-            write!(f, "{} moves {}", self.sfen, moves_str)
-        } else {
-            write!(f, "{}", self.sfen)
+        match self {
+            UsiInfo::Depth(depth) => write!(f, "depth {}", depth),
+            UsiInfo::SelDepth(seldepth) => write!(f, "seldepth {}", seldepth),
+            UsiInfo::Time(time) => write!(f, "time {}", time.num_milliseconds()),
+            UsiInfo::Nodes(nodes) => write!(f, "nodes {}", nodes),
+            UsiInfo::Pv(pv) => {
+                let moves = pv.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                write!(f, "pv {}", moves)
+            }
+            UsiInfo::MultiPv(multipv) => write!(f, "multipv {}", multipv),
+            UsiInfo::Score { cp, mate, lowerbound, upperbound } => {
+                let mut s = String::new();
+                if let Some(cp) = cp {
+                    s += &format!("cp {}", cp);
+                }
+                if let Some(mate) = mate {
+                    s += &format!(" mate {}", mate);
+                }
+                if let Some(lowerbound) = lowerbound {
+                    if *lowerbound {
+                        s += " lowerbound";
+                    }
+                }
+                if let Some(upperbound) = upperbound {
+                    if *upperbound {
+                        s += " upperbound";
+                    }
+                }
+                write!(f, "score {}", s.trim())
+            }
+            UsiInfo::CurrMove(currmove) => write!(f, "currmove {}", currmove),
+            UsiInfo::CurrMoveNum(currmovenum) => write!(f, "currmovenum {}", currmovenum),
+            UsiInfo::HashFull(hashfull) => write!(f, "hashfull {}", hashfull),
+            UsiInfo::Nps(nps) => write!(f, "nps {}", nps),
+            UsiInfo::CpuLoad(cpuload) => write!(f, "cpuload {}", cpuload),
+            UsiInfo::String(string) => write!(f, "string {}", string),
+            UsiInfo::Refutation(refutation) => {
+                let moves = refutation.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                write!(f, "refutation {}", moves)
+            }
+            UsiInfo::CurrLine { cpu_nr, line } => {
+                let moves = line.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" ");
+                if let Some(cpu_nr) = cpu_nr {
+                    write!(f, "currline {} {}", cpu_nr, moves)
+                } else {
+                    write!(f, "currline {}", moves)
+                }
+            }
+            UsiInfo::Any(name, value) => write!(f, "{} {}", name, value),
         }
     }
 }
-*/
+
