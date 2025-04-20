@@ -51,17 +51,17 @@ NL = _{ WHITESPACE | NEWLINE }
 SEP = _{"/"}
 
 // boundary
-KB = _{ NL+ | EOI } 
+KB = _{ NL* ~ NEWLINE } 
 
 // start 
-start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ EOI }
+start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ &EOI }
 
 // we need to allow trailing and ending garbage
 line = _{ garbage? ~ message ~ garbage? }
 
-//garbage = _{ !NEWLINE ~!start_of_command ~ ANY+ }
+garbage = _{ !NEWLINE ~!start_of_command ~ ANY+ }
 
-garbage = _{ !start_of_command ~ ANY+ }
+// garbage = _{ !start_of_command ~ ANY+ }
 
 start_of_command = _{ 
     "usi" | 
