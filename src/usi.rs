@@ -3,9 +3,23 @@
 use chrono::Duration;
 use haitaka_types::Move;
 use pest::error::Error as PestError;
-use std::fmt::{Display, Formatter, Result};
+//use std::fmt::{Display, Formatter, Result};
+use core::fmt::{self, Display, Formatter, Result};
 
 use crate::parser::Rule;
+
+/// UsiMessageError type. 
+#[derive(Debug)]
+pub struct UsiMessageError(String);
+
+impl fmt::Display for UsiMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result {
+        write!(f, "{}", self.0)
+    }    
+}
+
+impl core::error::Error for UsiMessageError {
+}
 
 /// A vector of UsiMessage instances.
 pub type UsiMessageList = Vec<UsiMessage>;
@@ -19,8 +33,28 @@ pub enum UsiMessage {
     /// Messages sent from the engine to the GUI.
     UsiEngineToGui(EngineMessage),
 
-    /// The Unknown Message (probably Lost in Translation)
+    /// The Unknown Message ("Lost in Translation")
     Unknown(String, Option<PestError<Rule>>),
+}
+
+impl Display for UsiMessage {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                UsiMessage::UsiGuiToEngine(msg) => format!("{}", msg),
+                UsiMessage::UsiEngineToGui(msg) => format!("{}", msg),
+                UsiMessage::Unknown(msg, opt_err) => {
+                    if let Some(err) = opt_err {
+                        format!("ERROR msg='{}' error='{}'", msg, err)
+                    } else {
+                        format!("Unknown msg '{}'", msg)
+                    }
+                }
+            }
+        )
+    }
 }
 
 /// Messages sent from the GUI to the engine.
@@ -53,15 +87,83 @@ pub enum GuiMessage {
     },
 }
 
-/*
-
-    "option name Nullmove type check default true\n"
-    "option name Selectivity type spin default 2 min 0 max 4\n"
-    "option name Style type combo default Normal var Solid var Normal var Risky\n"
-    "option name LearningFile type filename default /shogi/my-shogi-engine/learn.bin"
-    "option name ResetLearning type button\n"
-
-*/
+impl Display for GuiMessage {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            GuiMessage::Usi => write!(f, "usi"),
+            GuiMessage::Debug(on) => write!(f, "debug {}", if *on { "on" } else { "off" }),
+            GuiMessage::IsReady => write!(f, "isready"),
+            GuiMessage::Register { later, name, code } => {
+                if *later {
+                    write!(f, "register later")
+                } else {
+                    let mut s = String::from("register ");
+                    if let Some(n) = name {
+                        s += &format!("name {}", n);
+                    }
+                    if let Some(c) = code {
+                        if name.is_some() {
+                            s += &format!(" code {}", c);
+                        } else {
+                            s += &format!("code {}", c);
+                        }
+                    }
+                    write!(f, "{}", s)
+                }
+            }
+            GuiMessage::Position {
+                startpos,
+                sfen,
+                moves,
+            } => {
+                let mut s = String::from("position ");
+                if *startpos {
+                    s += &format!("startpos");
+                } else if let Some(sfen) = sfen {
+                    s += &format!("sfen {}", sfen);
+                } else {
+                    eprintln!("The `position` message requires either a `startpos` or a `sfen`.");
+                    return Err(fmt::Error);
+                }
+                if let Some(moves) = moves {
+                    s += &format!(
+                        "moves {}",
+                        moves
+                            .iter()
+                            .map(|m| m.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                }
+                write!(f, "{}", s)
+            }
+            GuiMessage::SetOption { name, value } => {
+                if let Some(value) = value {
+                    write!(f, "setoption name {} value {}", name, value)
+                } else {
+                    write!(f, "setoption name {}", name)
+                }
+            }
+            GuiMessage::UsiNewGame => write!(f, "usinewgame"),
+            GuiMessage::Stop => write!(f, "stop"),
+            GuiMessage::PonderHit => write!(f, "ponderhit"),
+            GuiMessage::Quit => write!(f, "quit"),
+            GuiMessage::Go {
+                time_control,
+                search_control,
+            } => {
+                let mut s = String::from("go");
+                if let Some(tc) = time_control {
+                    s += &format!(" {}", tc);
+                }
+                if let Some(sc) = search_control {
+                    s += &format!(" {}", sc);
+                }
+                write!(f, "{}", s)
+            }
+        }
+    }
+}
 
 /// Messages sent from the engine to the GUI.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -82,30 +184,44 @@ pub enum EngineMessage {
     Info(Vec<UsiInfo>),
 }
 
-/// Represents the copy protection or registration state.
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub enum StatusCheck {
-    /// Signifies the engine is checking the copy protection or registration.
-    Checking,
-
-    /// Signifies the copy protection or registration has been validated.
-    Ok,
-
-    /// Signifies error in copy protection or registratin validation.
-    Error,
-}
-
-impl Display for StatusCheck {
+impl Display for EngineMessage {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
-            StatusCheck::Checking => write!(f, "checking"),
-            StatusCheck::Ok => write!(f, "ok"),
-            StatusCheck::Error => write!(f, "error"),
+            EngineMessage::Id { name, author } => {
+                if let Some(n) = name {
+                    write!(f, "id name {}", n)
+                } else if let Some(a) = author {
+                    write!(f, "id author {}", a)
+                } else {
+                    eprintln!("The `id` message requires either a `name` or an `author` (or both).");
+                    return Err(fmt::Error);
+                }
+            }
+            EngineMessage::UsiOk => write!(f, "usiok"),
+            EngineMessage::ReadyOk => write!(f, "readyok"),
+            EngineMessage::BestMove { best_move, ponder } => {
+                let mut s = format!("bestmove {}", best_move);
+                if let Some(mv) = ponder {
+                    s += &format!(" ponder {}", mv);
+                }
+                write!(f, "{}", s)
+            }
+            EngineMessage::CopyProtection(state) => write!(f, "copyprotection {}", *state),
+            EngineMessage::Registration(state) => write!(f, "register {}", *state),
+            EngineMessage::Option(option) => write!(f, "option {}", *option),
+            EngineMessage::Info(info) => {
+                let info_str = info
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "info {}", info_str)
+            }
         }
     }
 }
 
-/// Time control settings (send by the `go` message).
+/// Time control settings (sent by the client's `go` message).
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum UsiTimeControl {
     /// The `go ponder` message.
@@ -156,6 +272,47 @@ impl UsiTimeControl {
     }
 }
 
+impl Display for UsiTimeControl {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            UsiTimeControl::Ponder => write!(f, "ponder"),
+            UsiTimeControl::Infinite => write!(f, "infinite"),
+            UsiTimeControl::MoveTime(x) => write!(f, "movetime {}", x.num_milliseconds()),
+            UsiTimeControl::TimeLeft { 
+                white_time, 
+                black_time, 
+                white_increment, 
+                black_increment, 
+                moves_to_go, 
+                byoyomi } => {
+                    let mut s = String::default();
+                    if let Some(wtime) = white_time {
+                        s += &format!(" wtime {}", wtime.num_milliseconds());
+                    }
+                    if let Some(btime) = black_time {
+                        s += &format!(" btime {}", btime.num_milliseconds());
+                    }
+                    if let Some(winc) = white_increment {
+                        s += &format!(" winc {}", winc.num_milliseconds());
+                    }
+                    if let Some(binc) = black_increment {
+                        s += &format!(" binc {}", binc.num_milliseconds());
+                    }
+                    if let Some(mtg) = moves_to_go {
+                        s += &format!(" movestogo {}", mtg);
+                    }
+                    if let Some(byo) = byoyomi {
+                        s += &format!(" byoyomi {}", byo.num_milliseconds());
+                    }
+                    write!(f, "{}", s.trim())
+            }
+        }
+    }
+}
+
+
+
+
 /// Search control settings (set by `go` message).
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub struct UsiSearchControl {
@@ -192,6 +349,39 @@ impl UsiSearchControl {
             || self.nodes.is_some()
     }
 }
+
+impl Display for UsiSearchControl {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            _ => write!(f, ""),
+        }
+    }
+}
+
+/// Represents the copy protection or registration state.
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub enum StatusCheck {
+    /// Signifies the engine is checking the copy protection or registration.
+    Checking,
+
+    /// Signifies the copy protection or registration has been validated.
+    Ok,
+
+    /// Signifies error in copy protection or registratin validation.
+    Error,
+}
+
+impl Display for StatusCheck {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        match self {
+            StatusCheck::Checking => write!(f, "checking"),
+            StatusCheck::Ok => write!(f, "ok"),
+            StatusCheck::Error => write!(f, "error"),
+        }
+    }
+}
+
+
 
 /// USI option type.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -328,157 +518,11 @@ pub enum UsiInfo {
     Any(String, String),
 }
 
-// Display trait implementations
 
-impl Display for UsiMessage {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                UsiMessage::UsiGuiToEngine(msg) => format!("{}", msg),
-                UsiMessage::UsiEngineToGui(msg) => format!("{}", msg),
-                UsiMessage::Unknown(msg, opt_err) => {
-                    if let Some(err) = opt_err {
-                        format!("ERROR msg='{}' error='{}'", msg, err)
-                    } else {
-                        format!("unknown msg '{}'", msg)
-                    }
-                }
-            }
-        )
-    }
-}
 
-impl Display for GuiMessage {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        match self {
-            GuiMessage::Usi => write!(f, "usi"),
-            GuiMessage::Debug(on) => write!(f, "debug {}", if *on { "on" } else { "off" }),
-            GuiMessage::IsReady => write!(f, "isready"),
-            GuiMessage::Register { later, name, code } => {
-                if *later {
-                    write!(f, "register later")
-                } else {
-                    let mut s = String::from("register ");
-                    if let Some(n) = name {
-                        s += &format!("name {}", n);
-                    }
-                    if let Some(c) = code {
-                        if name.is_some() {
-                            s += &format!(" code {}", c);
-                        } else {
-                            s += &format!("code {}", c);
-                        }
-                    }
-                    write!(f, "{}", s)
-                }
-            }
-            GuiMessage::Position {
-                startpos,
-                sfen,
-                moves,
-            } => {
-                let mut s = String::from("position ");
-                if *startpos {
-                    s += &format!("startpos");
-                } else if let Some(sfen) = sfen {
-                    s += &format!("sfen {}", sfen);
-                } else {
-                    assert!(false, "GuiMessage::Position misses both startpos and sfen");
-                }
-                if let Some(moves) = moves {
-                    s += &format!(
-                        "moves {}",
-                        moves
-                            .iter()
-                            .map(|m| m.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    );
-                }
-                write!(f, "{}", s)
-            }
-            GuiMessage::SetOption { name, value } => {
-                if let Some(v) = value {
-                    write!(f, "setoption name {} value {}", name, v)
-                } else {
-                    write!(f, "setoption name {}", name)
-                }
-            }
-            GuiMessage::UsiNewGame => write!(f, "usinewgame"),
-            GuiMessage::Stop => write!(f, "stop"),
-            GuiMessage::PonderHit => write!(f, "ponderhit"),
-            GuiMessage::Quit => write!(f, "quit"),
-            GuiMessage::Go {
-                time_control,
-                search_control,
-            } => {
-                let mut s = String::from("go");
-                if let Some(tc) = time_control {
-                    s += &format!(" {}", tc);
-                }
-                if let Some(sc) = search_control {
-                    s += &format!(" {}", sc);
-                }
-                write!(f, "{}", s)
-            }
-        }
-    }
-}
 
-impl Display for UsiTimeControl {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        match self {
-            _ => write!(f, ""),
-        }
-    }
-}
 
-impl Display for UsiSearchControl {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        match self {
-            _ => write!(f, ""),
-        }
-    }
-}
 
-impl Display for EngineMessage {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        match self {
-            EngineMessage::Id { name, author } => {
-                if let Some(n) = name {
-                    write!(f, "id name {}", n)
-                } else if let Some(a) = author {
-                    write!(f, "id author {}", a)
-                } else {
-                    // reachable???
-                    write!(f, "id")
-                }
-            }
-            EngineMessage::UsiOk => write!(f, "usiok"),
-            EngineMessage::ReadyOk => write!(f, "readyok"),
-            EngineMessage::BestMove { best_move, ponder } => {
-                let mut s = format!("bestmove {}", best_move);
-                if let Some(p) = ponder {
-                    s += &format!(" ponder {}", p);
-                }
-                write!(f, "{}", s)
-            }
-            EngineMessage::CopyProtection(state) => write!(f, "copyprotection {}", *state),
-            EngineMessage::Registration(state) => write!(f, "register {}", *state),
-            EngineMessage::Option(option) => write!(f, "option {}", *option),
-            EngineMessage::Info(info) => {
-                let info_str = info
-                    .iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                write!(f, "info {}", info_str)
-            }
-        }
-    }
-}
 
 impl Display for UsiOptionType {
     fn fmt(&self, f: &mut Formatter) -> Result {
