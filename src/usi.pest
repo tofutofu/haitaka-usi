@@ -51,7 +51,7 @@ NL = _{ WHITESPACE | NEWLINE }
 SEP = _{"/"}
 
 // boundary
-KB = _{ NL* ~ NEWLINE } 
+KB = _{ WHITESPACE* ~ NEWLINE } 
 
 // start 
 start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ &EOI }
