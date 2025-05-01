@@ -6,24 +6,26 @@
 // - https://shogidokoro2.stars.ne.jp/usi.html 
 //
 // Both the UCI protocol and the initial version of the USI protocol (the second link above)
-// are annoyingly vague about details and edge conditions. The UCI protocol also made some very
-// unfortunate, bad design decisions that make the protocol more brittle than it needed to be
-// and cause difficulties for any implementation. In particular, the decision to _silently 
-// ignore gargabe tokens_ in the commands, which itself can only be partially enforced.
+// are vague about details, edge cases and error conditions. The UCI protocol also made some
+// unfortunate, bad design decisions that make the protocol brittle and that make it more
+// difficult to implement the spec. In particular, the decision to _silently 
+// ignore_ leading and trailing garbage tokens seems rather questionable.
 //
-// The protocol requires that
+// Requirements:
+//
 // - All communication between engine and GUI is done by 7-bit ASCII text.
-// - All command strings sent or received must end with '\n'. 
-//   (Note: '\n' can be 0x0d or 0x0a0d or any combination depending on the OS). 
-// - Arbitrary white space between tokens is allowed.
-//   [Note: "white space" is not strictly defined in the spec. We limit it to only
-//   ascii space ' ' and ascii tab '\t'. Newlines are handled separately.]
+// - All command strings must end with '\n'. All viable end-of-line characters should be
+//   handled ('\n', '\r', or any combination).
+// - Arbitrary white space between tokens is allowed. Note the spec does not define "white space".
+//   I will defined it as any ascii white-space (' ', '\t', '\v', '\f').
 // - If the engine or the GUI receives an unknown command or token it should just ignore it 
 //   and try to parse the rest of the line. Examples: 
-//   `joho debug on\n` should switch the debug mode on given that joho is not defined, 
-//   `debug joho on\n` will be undefined however [will generate a parse error].
-// - If the engine receives a command which is unexpected, for example `stop` when 
-//   the engine is not calculating, it should also just ignore it.
+//   - `joho debug on\n` should switch the debug mode on given that joho is not defined, 
+//   - `debug joho on\n` will be undefined however.
+//   So, apparently this means that unparsable prefixes and suffixes of commands should be ignored.
+// - If the engine receives a command that is unexpected, for example `stop` when 
+//   the engine is not calculating, it should also just ignore it. (This doesn't involve syntax,
+//   but semantics.)
 // - All options with fixed semantics start with the prefix "USI_". For instance, 
 //   the option which is named Hash in UCI is named USI_Hash in USI. 
 // 
@@ -32,25 +34,31 @@
 // The ref doesn't specify whether or not commands are case-sensitive. Stockfish only accepts 
 // lowercased commands. I will also assume that all commands must be in lower case; I believe
 // this is in the spirit of the spec. But all user-specified strings, names, options are
-// treated as case-sensitive -- unless the spec explicitly demands case-insensitive handling.
+// treated as case-sensitive unless the spec explicitly demands case-insensitive handling (as it
+// does for options).
 //
 // Numbers
 // -------
 // I chose to not put any restrictions in the syntax on numbers. Checking that a value
-// makes sense should imo be done in the parser (or by the engine). One reason of not
-// restricting this on a too low level is also that it gives the parser + engine more freedom
+// makes sense should imo be done in the parser. One reason of not restricting this on a too 
+// low level is also that it gives the parser and engine more freedom
 // (e.g. the freedom to allow very long mate problems with over a 1000 moves as input).
-// A more principled reason is that the USI spec (even though it is not a formal spec) 
-// doesn't specify any restrictions. Downside is that this does require the GUI or engine
-// to guard more carefully against possibly crazy input.
+// A more principled reason is that the USI spec doesn't specify any restrictions. 
 //
-// The published specs are extremely vague about error conditions. For instance:
+// The published specs say practically nothing about error conditions. For instance:
 // Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should it 
 // be an error? Should `debugon` and `de bugon` be parsed as `debug on`, or as garbage?
 // Since the spec talks about "tokens" (without defining those), it seems reasonable to interpret 
-// all keywords as "tokens" and to require that all must be delimited either by white-space 
-// (including newlines) or by SOI (start of input) or EOI (end of input). In the grammar below, 
+// all keywords as "tokens" and to require that all tokens must be delimited either by white-space 
+// (excluding newlines) or SOI (start of input) or EOI (end of input). In the grammar below, 
 // I have enforced this by using a special "boundary" marker (`KB`) on messages.
+//
+// Details (from Shogidokoro)
+// --------------------------
+//
+// - When a SFEN string encodes an arbitrary position, the move number doesn't really make sense
+// anymore. So, we can arbitrarily set it to 1 (or expect it to be set to 1).
+// 
 
 WHITESPACE = _{ " " | "\t" }
 WS = _{ WHITESPACE+ }
@@ -66,7 +74,7 @@ start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ &EOI }
 // we need to allow trailing and ending garbage
 line = _{ garbage? ~ message ~ garbage? }
 
-garbage = _{ !NEWLINE ~!start_of_command ~ ANY+ }
+garbage = _{ !NEWLINE ~ !start_of_command ~ ANY+ }
 
 // garbage = _{ !start_of_command ~ ANY+ }
 
@@ -252,7 +260,8 @@ registration = ${ "registration" ~ WS ~ status_check ~ &KB }
 
     status_check = { "checking" | "ok" | "error" }
 
-// Option examples:
+// Option examples
+// ---------------
 // option name Nullmove type check default true\n
 // option name Selectivity type spin default 2 min 0 max 4\n
 // option name Style type combo default Normal var Solid var Normal var Risky\n
@@ -263,8 +272,8 @@ registration = ${ "registration" ~ WS ~ status_check ~ &KB }
 // "Certain options have a fixed value for id, which means that the semantics of this option is fixed."
 // For Shogi those have prefix "USI_" rather than "UCI_".
 
-// Spaces are not allowed in option names.
-// The name and value of the option in <id> should not be case sensitive and can not include spaces.
+// Spaces are not allowed in option names. It seems they are allowed in option values (in particular in
+// the 'string' or 'filename' option). Nothing is specified about any escape characters.
 
 option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_option | button_option | filename_option) ~ &KB }
 
@@ -286,12 +295,18 @@ option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_
     var = { !("var") ~ var_token }
     var_token = ${ !("default" | "var") ~ token}
     
-// Info examples:
+// Info examples
+// -------------
 //  info currmove e2e4 currmovenumber 1
 // 	info depth 12 nodes 123456 nps 100000
 //
-// All infos belonging to the pv should be sent together, e.g.
+// The spec says that "all infos belonging to the pv should be sent together", e.g.
+//
 //  info depth 2 score cp 214 time 1242 nodes 2124 nps 34928 pv 2g2f 8c8d 2f2e 8d8e
+//
+// however, it forgets to mention which infos always "belong to" the pv.
+// The 'pv' apparently always ends an info command, so it can also not go togeter with the
+// 'info string ...' message (Shogidokoro).
 //
 //  info depth 1 seldepth 0
 //  info score cp 13  depth 1 nodes 13 time 15 pv 2g2f
