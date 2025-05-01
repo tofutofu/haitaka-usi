@@ -3,6 +3,13 @@
 // References: 
 // - UCI protocol (https://backscattering.de/chess/uci/)
 // - The Universal Shogi Interface (http://hgm.nubati.net/usi.html)
+// - https://shogidokoro2.stars.ne.jp/usi.html 
+//
+// Both the UCI protocol and the initial version of the USI protocol (the second link above)
+// are annoyingly vague about details and edge conditions. The UCI protocol also made some very
+// unfortunate, bad design decisions that make the protocol more brittle than it needed to be
+// and cause difficulties for any implementation. In particular, the decision to _silently 
+// ignore gargabe tokens_ in the commands, which itself can only be partially enforced.
 //
 // The protocol requires that
 // - All communication between engine and GUI is done by 7-bit ASCII text.
@@ -82,7 +89,8 @@ start_of_command = _{
     "copyprotection" |
     "registration" |
     "option" |
-    "info"
+    "info" |
+    "gameover"
 }
 
 // message
@@ -105,11 +113,12 @@ message = _{
     copyprotection | 
     registration | 
     option | 
-    info
+    info |
+    gameover
 }
 
 //
-// GUI to engine
+// GuiMessage: GUI to engine
 //
 
 usi = ${ "usi" ~ &KB }
@@ -120,7 +129,7 @@ isready = { "isready" ~ &KB }
 
 setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
 
-    // "The name and value of the option in id should not be case sensitive and can inlude spaces."
+    // "The name and value of the option in id should not be case sensitive and CAN inlude spaces."
     // `value` will consume until EOL
     // if no value is found, then `name` may consume rest of line
     setoption_name = ${ setoption_token ~ (WS ~ setoption_token)* }
@@ -145,7 +154,11 @@ quit = { "quit" ~ &KB }
 
 ponderhit = { "ponderhit" ~ &KB }
 
-// ln1g5/1r2S1k2/p2pppn2/2ps2p2/1p7/2P6/PPSPPPPLP/2G2K1pr/LN4G1b w BGSLPnp 62
+gameover = ${ "gameover" ~ WS ~ (win | lose | draw) ~ &KB }
+    
+    win = { "win" }
+    lose = { "lose" }
+    draw = { "draw" }
 
 position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)? ~ &KB }
 
@@ -216,7 +229,7 @@ go = ${ "go" ~ (WS ~ go_sub_cmd)* ~ &KB }
     infinite = { "infinite" }
 
 //
-// engine to GUI
+// EngineMessage: Engine to GUI
 //
 
 id = ${ "id" ~ WS ~ (id_name | id_author) }
@@ -250,28 +263,29 @@ registration = ${ "registration" ~ WS ~ status_check ~ &KB }
 // "Certain options have a fixed value for id, which means that the semantics of this option is fixed."
 // For Shogi those have prefix "USI_" rather than "UCI_".
 
-option = ${ "option" ~ WS ~ option_name ~ WS ~ option_type ~ (WS ~ option_vars)? ~ &KB }
+// Spaces are not allowed in option names.
+// The name and value of the option in <id> should not be case sensitive and can not include spaces.
 
-    option_name = ${ "name" ~ WS ~ option_name_tokens }
-    option_name_tokens = ${ !("type") ~ token ~ (WS ~ option_name_tokens)? }
+option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_option | button_option | filename_option) ~ &KB }
 
-    option_type = ${ "type" ~ WS ~ (check | spin | combo | string | button | filename) }
-        check = { "check" }
-        spin = { "spin" }
-        combo = { "combo" }
-        string = { "string" }
-        button = { "button" }
-        filename = { "filename" }
+    check_option = ${ option_name ~ WS ~ "type" ~ WS ~ "check" ~ (WS ~ "default" ~ WS ~ check_default)? }
+    spin_option = ${ option_name ~ WS ~ "type" ~ WS ~ "spin" ~ (WS ~ "default" ~ WS ~ spin_default)? ~ (WS ~ spin_min)? ~ (WS ~ spin_max)? }
+    combo_option = ${ option_name ~ WS ~ "type" ~ WS ~ "combo" ~ (WS ~ "default" ~ WS ~ default)? ~ (WS ~ "var" ~ WS ~ var)* }
+    string_option = ${ option_name ~ WS ~ "type" ~ WS ~ "string" ~ (WS ~ "default" ~ WS ~ default)? }
+    button_option = ${ option_name ~ WS ~ "type" ~ WS ~ "button" }
+    filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ default)? }
 
-    option_vars = { min | max | default | var+ }
-        // `min` and `max` only make sense with type `spin`, but the grammar doesn't enforce this
-        min = ${ "min" ~ WS ~ digits }
-        max = ${ "max" ~ WS ~ digits }        
-        default = ${ "default" ~ WS ~ option_vars_tokens  }    
-        // var allows any sequence of tokens, except the reserved words 'min', 'max', 'var' and 'default'    
-        var = ${ "var" ~ WS ~ option_vars_tokens }
-        option_vars_tokens = { !("min" | "max" | "var" | "default") ~ token ~ (WS ~ option_vars_tokens)? }
-
+    option_name = ${ "name" ~ WS ~ name_token }
+    name_token = ${ !("type") ~ token }
+    
+    check_default = { "true" | "false" }
+    spin_default = { integer }
+    spin_min = ${ "min" ~ WS ~ integer }
+    spin_max = ${ "max" ~ WS ~ integer }
+    default = ${ "default" ~ WS ~ var_token }
+    var = { !("var") ~ var_token }
+    var_token = ${ !("default" | "var") ~ token}
+    
 // Info examples:
 //  info currmove e2e4 currmovenumber 1
 // 	info depth 12 nodes 123456 nps 100000
@@ -306,7 +320,8 @@ info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
         info_multipv | 
         info_refutation | 
         info_currline |
-        info_score |
+        info_score_cp |
+        info_score_mate |
         info_string
     }
 
@@ -320,17 +335,26 @@ info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
     info_nps = ${ "nps" ~ WS ~ digits }
     info_cpuload = ${ "cpuload" ~ WS ~ digits }    
     info_pv = ${ "pv" ~ WS ~ moves }
+    // multipv should be more restricted perhaps, since multiple multipv commands need to
+    // be sent in separate commands
     info_multipv = ${ "multipv" ~ WS ~ digits }
     info_refutation = ${ "refutation" ~ WS ~ moves }
-    // "currline: If cpunr is greater than 1, always send all k lines in k strings together."
-    // `cpunr` should then only occur at most once in each expression - I think
-    info_currline = ${ "currline" ~ WS ~ (digits ~ WS)? ~ moves }
-    info_score = ${ "score" ~ WS ~ (score_cp | score_mate) ~ (WS ~ score_lowerbound)? ~ (WS ~ score_upperbound)? }
 
-        score_cp = ${ "cp" ~ WS ~ integer }
-        score_mate = ${ "mate" ~ WS ~ integer }
-        score_lowerbound = { "lowerbound" }
-        score_upperbound = { "upperbound" }
+    // "currline: If cpunr is greater than 1, always send all k lines in k strings together."
+    // I assume that means, send multiple new-line separated `currline` messages.
+    // `cpunr` should then only occur at most once in each expression. The quote illustrates
+    // the extreme vagueness of the spec.
+    info_currline = ${ "currline" ~ WS ~ (digits ~ WS)? ~ moves }
+
+    // Assuming that `score cp x` and `score mate x` are never sent as `info score cp x mate y`. 
+    // Shogidokoro: `score mate +` means the engine has a discovered a forced mate, but cannot tell
+    // how many moves. Similarly `score mate -` means the engine has discovered that the opponent
+    // has a forced mate against the engine, but it cannot tell how many moves this has.
+    info_score_cp = ${ "score" ~ WS ~ "cp" ~ WS ~ integer ~ (WS ~ (lowerbound | upperbound))? }
+    info_score_mate = ${ "score" ~ WS ~ "mate" ~ WS ~ ((integer ~ (WS ~ (lowerbound | upperbound))?) | sign) }
+
+        lowerbound = { "lowerbound" }
+        upperbound = { "upperbound" }
 
     // consumes until EOL
     info_string = ${ "string" ~ WS ~ tokens }

@@ -1,8 +1,10 @@
+pub mod engine;
+pub mod gui;
+pub mod helpers;
 pub mod parser;
-pub mod usi;
 
-pub use parser::*;
-pub use usi::*;
+pub use engine::*;
+pub use gui::*;
 
 #[cfg(test)]
 mod tests;

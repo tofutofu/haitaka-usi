@@ -126,6 +126,7 @@ dependencies = [
  "haitaka-types",
  "pest",
  "pest_derive",
+ "thiserror",
 ]
 
 [[package]]

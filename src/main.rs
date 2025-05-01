@@ -1,7 +1,12 @@
-use haitaka_usi::parser::*;
-use std::io::{self, Read, Write};
+//use haitaka_usi::parser::*;
+//use std::io::{self, Read, Write};
 
 fn main() {
+    println!("Hello USI");
+}
+
+/*
+fn test() {
     loop {
         print!(">>> ");
         io::stdout().flush().unwrap();
@@ -30,3 +35,4 @@ fn main() {
         }
     }
 }
+*/
