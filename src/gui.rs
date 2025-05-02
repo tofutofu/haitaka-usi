@@ -1,9 +1,8 @@
 //! This module contains the data-model for GuiMessage, the commands sent from the GUI to the Engine.
-use chrono::Duration;
-use std::fmt;
-// use std::time::Duration;
 use crate::format_vec;
 use haitaka_types::Move;
+use std::fmt;
+use std::time::Duration;
 
 pub const SFEN_STARTPOS: &str = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
@@ -267,19 +266,19 @@ impl fmt::Display for EngineParams {
             params += " ponder";
         }
         if let Some(btime) = self.btime {
-            params += &format!(" btime {}", btime.num_milliseconds());
+            params += &format!(" btime {}", btime.as_millis());
         }
         if let Some(wtime) = self.wtime {
-            params += &format!(" wtime {}", wtime.num_milliseconds());
+            params += &format!(" wtime {}", wtime.as_millis());
         }
         if let Some(binc) = self.binc {
-            params += &format!(" binc {}", binc.num_milliseconds());
+            params += &format!(" binc {}", binc.as_millis());
         }
         if let Some(winc) = self.winc {
-            params += &format!(" winc {}", winc.num_milliseconds());
+            params += &format!(" winc {}", winc.as_millis());
         }
         if let Some(byoyomi) = self.byoyomi {
-            params += &format!(" byoyomi {}", byoyomi.num_milliseconds());
+            params += &format!(" byoyomi {}", byoyomi.as_millis());
         }
         if let Some(movestogo) = self.movestogo {
             params += &format!(" movestogo {}", movestogo);
@@ -293,7 +292,7 @@ impl fmt::Display for EngineParams {
         if let Some(ref mate) = self.mate {
             match mate {
                 MateParam::Timeout(duration) => {
-                    params += &format!(" mate {}", duration.num_milliseconds());
+                    params += &format!(" mate {}", duration.as_millis());
                 }
                 MateParam::Infinite => {
                     params += " mate infinite";
@@ -301,7 +300,7 @@ impl fmt::Display for EngineParams {
             }
         }
         if let Some(movetime) = self.movetime {
-            params += &format!(" movetime {}", movetime.num_milliseconds());
+            params += &format!(" movetime {}", movetime.as_millis());
         }
         if self.infinite {
             params += " infinite";

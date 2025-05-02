@@ -69,7 +69,7 @@ SEP = _{"/"}
 
 // start 
 start = _{SOI ~ line+ ~ &EOI}
-line = _{ other? ~ (delimited_message|junk) }
+line = _{ other? ~ (delimited_message | junk) }
 
 delimited_message = _{ NL* ~ message ~ WHITESPACE* ~ NEWLINE }
 
@@ -220,7 +220,6 @@ go = ${ "go" ~ (WS ~ go_sub_cmd)*  }
 
 id = ${ "id" ~ WS ~ (id_name | id_author) }
 
-    // consume until EOL
     id_name = ${ "name" ~ WS ~ tokens }
     id_author = ${ "author" ~ WS ~ tokens }
 
@@ -228,9 +227,10 @@ usiok = { "usiok"  }
 
 readyok = { "readyok"  }
 
-bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)?  }
+bestmove = ${ "bestmove" ~ WS ~ ((one_move ~ (WS ~ ponder_move)?) | resign | win)  }
 
     ponder_move = { "ponder" ~ WS ~ one_move }
+    resign = { "resign" }
 
 copyprotection = ${ "copyprotection" ~ WS ~ status_check  }
 
@@ -243,11 +243,13 @@ option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_
     check_option = ${ option_name ~ WS ~ "type" ~ WS ~ "check" ~ (WS ~ "default" ~ WS ~ check_default)? }
     spin_option = ${ option_name ~ WS ~ "type" ~ WS ~ "spin" ~ (WS ~ "default" ~ WS ~ spin_default)? ~ (WS ~ spin_min)? ~ (WS ~ spin_max)? }
     combo_option = ${ option_name ~ WS ~ "type" ~ WS ~ "combo" ~ (WS ~ "default" ~ WS ~ default)? ~ (WS ~ "var" ~ WS ~ var)* }
+    // spec doesn't clearly say whether or not a 'string' and 'filename' option always require a default
+    // it seems they do (but I'm going to leave it as optional as seems to be the general interpretation)
     string_option = ${ option_name ~ WS ~ "type" ~ WS ~ "string" ~ (WS ~ "default" ~ WS ~ default)? }
     button_option = ${ option_name ~ WS ~ "type" ~ WS ~ "button" }
     filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ default)? }
 
-    // option_name can not contain spaces
+    // option_name may not contain spaces
     option_name = ${ "name" ~ WS ~ name_token }
     name_token = ${ !("type") ~ token }
     
@@ -290,8 +292,8 @@ info = ${ "info" ~ (WS ~ info_attr)+  }
     info_nps = ${ "nps" ~ WS ~ digits }
     info_cpuload = ${ "cpuload" ~ WS ~ digits }    
     info_pv = ${ "pv" ~ WS ~ moves }
-    // multipv should be more restricted perhaps, since multiple multipv commands need to
-    // be sent in separate commands
+    // multiple multipv commands need to be sent in separate lines
+    // so multipv should perhaps be more restrictive
     info_multipv = ${ "multipv" ~ WS ~ digits }
     info_refutation = ${ "refutation" ~ WS ~ moves }
 

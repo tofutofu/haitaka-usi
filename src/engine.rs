@@ -1,9 +1,8 @@
 //! This module contains the data-model for EngineMessage, the commands sent from Engine to GUI.
-use std::fmt;
-//use std::time::Duration;
 use crate::format_vec;
-use chrono::Duration;
 use haitaka_types::Move;
+use std::fmt;
+use std::time::Duration;
 
 /// Messages sent from the Shogi Engine to the GUI.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -280,7 +279,7 @@ impl fmt::Display for InfoParam {
         match self {
             Self::Depth(n) => write!(f, "depth {}", n),
             Self::SelDepth(n) => write!(f, "seldepth {}", n),
-            Self::Time(n) => write!(f, "time {}", n.num_milliseconds()),
+            Self::Time(n) => write!(f, "time {}", n.as_millis()),
             Self::Nodes(n) => write!(f, "nodes {}", n),
             Self::Pv(mvs) => write!(f, "pv {}", format_vec!(mvs)),
             Self::MultiPv(n) => write!(f, "multipv {}", n),
