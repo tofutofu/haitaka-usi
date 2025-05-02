@@ -223,23 +223,21 @@ impl fmt::Display for StatusCheck {
     }
 }
 
-macro_rules! write_name_and_default {
-    ($f: ident, $name: ident, $default: ident) => {
-        match $default {
-            // TODO: if default == "", write "<empty>"
-            Some($default) => write!($f, "name {} default {}", $name, $default),
-            _ => write!($f, "name {}", $name),
-        }
-    };
-}
-
 impl fmt::Display for OptionParam {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Check { name, default } => write_name_and_default!(f, name, default),
-            Self::String { name, default } | Self::Filename { name, default } => {
-                write_name_and_default!(f, name, default)
+            Self::Check { name, default } => {
+                if let Some(default) = default {
+                    write!(f, "name {} default {}", name, default)
+                } else {
+                    write!(f, "name {}", name)
+                }
             }
+            Self::String { name, default } | Self::Filename { name, default } => match default {
+                Some(s) if s.is_empty() => write!(f, "name {} default <empty>", name),
+                Some(s) => write!(f, "name {} default {}", name, s),
+                _ => write!(f, "name {}", name),
+            },
             Self::Button { name } => write!(f, "name {} type button", name),
             Self::Spin {
                 name,
