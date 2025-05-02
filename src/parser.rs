@@ -83,15 +83,11 @@ pub enum ParseError {
 }
 
 impl GuiMessage {
-    /// Parse a USI message from Gui to Engine.
+    /// Parse one USI message received by the Engine
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         match UsiParser::parse(Rule::gui_message, s) {
-            Ok(pairs) => {
-                Self::inner_parse(pairs.into_iter().next().unwrap())
-            }
-            Err(err) => {
-                Err(ParseError::PestError(err))
-            }
+            Ok(pairs) => Self::inner_parse(pairs.into_iter().next().unwrap()),
+            Err(err) => Err(ParseError::PestError(err)),
         }
     }
 
@@ -99,14 +95,13 @@ impl GuiMessage {
         let pairs = UsiParser::parse(Rule::start, s)?;
         for p in pairs {
             let msg = Self::inner_parse(p);
-            match msg {
-                Ok(m) => msgs.push(m),
-                Err(_) => (),
+            if let Ok(msg) = msg {
+                msgs.push(msg);
             }
         }
         Ok(())
     }
-    
+
     fn inner_parse(p: Pair<'_, Rule>) -> Result<Self, ParseError> {
         let msg: Self = match p.as_rule() {
             Rule::usi => Self::parse_usi()?,
@@ -123,7 +118,7 @@ impl GuiMessage {
             Rule::quit => Self::parse_quit()?,
             _ => Self::parse_unknown(p.as_str()),
         };
-        return Ok(msg);
+        Ok(msg)
     }
 
     // unknown
@@ -235,11 +230,13 @@ impl GuiMessage {
                 Rule::mate => {
                     for spi in sp.into_inner() {
                         match spi.as_rule() {
-                            Rule::millisecs => params = params.mate(MateParam::Timeout(parse_millisecs(spi)?)),
+                            Rule::millisecs => {
+                                params = params.mate(MateParam::Timeout(parse_millisecs(spi)?))
+                            }
                             Rule::infinite => params = params.mate(MateParam::Infinite),
-                            _ => unreachable!()
+                            _ => unreachable!(),
                         }
-                    } 
+                    }
                 }
                 Rule::byoyomi => {
                     params = params.byoyomi(parse_millisecs(sp)?);
@@ -314,22 +311,35 @@ pub struct GuiMessageStream<'a> {
 
 impl<'a> GuiMessageStream<'a> {
     /// Create a new `GuiMessageStream` from an input string
-    pub fn new(input: &'a str) -> Result<Self, ParseError> {
-        let pairs = UsiParser::parse(Rule::start, input)?; 
-        Ok(Self { pairs })
+    ///
+    /// Since the grammar is designed to process any input, this _should_ never fail.
+    pub fn new(input: &'a str) -> Self {
+        Self::parse(input)
+    }
+
+    pub fn parse(input: &'a str) -> Self {
+        Self::try_parse(input).expect("Internal error: Failed to initialize UsiParser.")
+    }
+
+    pub fn try_parse(input: &'a str) -> Result<Self, ParseError> {
+        let pairs = UsiParser::parse(Rule::start, input);
+        match pairs {
+            Ok(pairs) => Ok(Self { pairs }),
+            Err(e) => Err(ParseError::PestError(e)),
+        }
     }
 }
 
-impl<'a> Iterator for GuiMessageStream<'a> {
+impl Iterator for GuiMessageStream<'_> {
     type Item = GuiMessage;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(pair) = self.pairs.next() {
+        for pair in self.pairs.by_ref() {
             let res = GuiMessage::inner_parse(pair);
-            if res.is_ok() {
-                return Some(res.unwrap());
-            } 
-        } 
+            if let Ok(res) = res {
+                return Some(res);
+            }
+        }
         None
     }
 }
@@ -339,29 +349,24 @@ impl<'a> Iterator for GuiMessageStream<'a> {
 impl EngineMessage {
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         match UsiParser::parse(Rule::engine_message, s) {
-            Ok(pairs) => Self::inner_parse(pairs),
-            Err(err) => {
-                Err(ParseError::PestError(err))
-            }
+            Ok(pairs) => Self::inner_parse(pairs.into_iter().next().unwrap()),
+            Err(err) => Err(ParseError::PestError(err)),
         }
     }
 
-    pub fn inner_parse(pairs: Pairs<Rule>) -> Result<Self, ParseError> {
-        if let Some(p) = pairs.into_iter().next() {
-            let msg: Self = match p.as_rule() {
-                Rule::id => Self::parse_id(p)?,
-                Rule::usiok => Self::parse_usiok()?,
-                Rule::readyok => Self::parse_readyok()?,
-                Rule::bestmove => Self::parse_bestmove(p)?,
-                Rule::copyprotection => Self::parse_copyprotection(p)?,
-                Rule::registration => Self::parse_registration(p)?,
-                Rule::option => Self::parse_option(p)?,
-                Rule::info => Self::parse_info(p)?,
-                _ => Self::parse_unknown(p.as_str()),
-            };
-            return Ok(msg);
-        }
-        unreachable!()
+    pub fn inner_parse(p: Pair<'_, Rule>) -> Result<Self, ParseError> {
+        let msg: Self = match p.as_rule() {
+            Rule::id => Self::parse_id(p)?,
+            Rule::usiok => Self::parse_usiok()?,
+            Rule::readyok => Self::parse_readyok()?,
+            Rule::bestmove => Self::parse_bestmove(p)?,
+            Rule::copyprotection => Self::parse_copyprotection(p)?,
+            Rule::registration => Self::parse_registration(p)?,
+            Rule::option => Self::parse_option(p)?,
+            Rule::info => Self::parse_info(p)?,
+            _ => Self::parse_unknown(p.as_str()),
+        };
+        Ok(msg)
     }
 
     // unknown
@@ -684,6 +689,45 @@ impl EngineMessage {
             }
         }
         Ok(InfoParam::ScoreMate(v, bound))
+    }
+}
+
+pub struct EngineMessageStream<'a> {
+    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+}
+
+impl<'a> EngineMessageStream<'a> {
+    /// Create a new `EngineMessageStream` from an input string
+    ///
+    /// Since the grammar is designed to process any input, this _should_ never fail.
+    pub fn new(input: &'a str) -> Self {
+        Self::parse(input)
+    }
+
+    pub fn parse(input: &'a str) -> Self {
+        Self::try_parse(input).expect("Internal error: Failed to initialize UsiParser.")
+    }
+
+    pub fn try_parse(input: &'a str) -> Result<Self, ParseError> {
+        let pairs = UsiParser::parse(Rule::start, input);
+        match pairs {
+            Ok(pairs) => Ok(Self { pairs }),
+            Err(e) => Err(ParseError::PestError(e)),
+        }
+    }
+}
+
+impl Iterator for EngineMessageStream<'_> {
+    type Item = EngineMessage;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for pair in self.pairs.by_ref() {
+            let res = EngineMessage::inner_parse(pair);
+            if let Ok(res) = res {
+                return Some(res);
+            }
+        }
+        None
     }
 }
 

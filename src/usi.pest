@@ -5,19 +5,22 @@
 // - The Universal Shogi Interface (http://hgm.nubati.net/usi.html)
 // - https://shogidokoro2.stars.ne.jp/usi.html 
 //
-// Both the UCI protocol and the initial version of the USI protocol (the second link above)
+// Both the UCI protocol and the draft version of the USI protocol (the second link above)
 // are vague about details, edge cases and error conditions. The UCI protocol also made some
 // very unfortunate, bad design decisions that make the protocol brittle and make more difficult
 // to implement. In particular, the decision to _silently  ignore_ junk tokens was questionable.
+// The Japanese spec by Shogidokoro is clearer on some details and on actual usage, so I am
+// taking that as my basis.
 //
 // Requirements
 // ------------
 // - All communication between engine and GUI is done by 7-bit ASCII text.
-//   This seems to imply that any non-ascii text should be rejected. The spec is not
+//   This seems to imply that non-ascii text should be rejected. The spec is not
 //   very clear if this is indeed the case for the `info string ...` and `info filename ...`
-//   commands. There is no length restriction on those two commands; in some cases they
-//   could pose security risks. In the grammar below I do allow non-ASCII characters in
-//   the junk portions (rule `other`).
+//   commands. There is also no length restriction on those two commands; in some cases they
+//   could pose security risks. In the grammar below I strictly require ASCII in all commands
+//   including in option names and values, but do allow non-ASCII characters in junk portions
+//   (which are to be ignored).
 // - All command strings must end with '\n'. All viable end-of-line characters should be
 //   handled ('\n', '\r', or any combination). PEST NEWLINE handles this.
 // - Arbitrary white space between tokens is allowed. The spec does not define "white space".
@@ -26,7 +29,7 @@
 //   and try to parse the rest of the line". Examples: 
 //   - `joho debug on\n` should switch the debug mode on given that joho is not defined, 
 //   - `debug joho on\n` will be undefined however.
-//   Apparently this means that unparsable prefixes should be ignored. In the grammar here
+//   Apparently this means that unparsable _prefixes_ should be ignored. In the grammar here
 //   I allow leading junk but no trailing junk on any given line.
 // - If the engine receives a command that is unexpected, for example `stop` when 
 //   the engine is not calculating, it should also just ignore it. This is not handled by
@@ -38,28 +41,19 @@
 // 
 // Case-sensitivity
 // ----------------
-// The ref doesn't specify whether or not commands are case-sensitive. Stockfish only accepts 
-// lowercased commands. I will also assume that all commands must be in lower case; I believe
-// this is in the spirit of the spec. But all user-specified strings (names, option name and
-// string values) are treated as case-sensitive unless the spec explicitly demands case-insensitive
-// handling.
+// The spec doesn't specify whether or not command tokens are case-sensitive. Stockfish only accepts 
+// lowercased commands. In the grammar below all command tokens and key words are expected to be 
+// ASCII lower case.
 //
-// Errors
-// ------
-// The published specs say practically nothing about error conditions. For instance:
-// Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should it 
-// be an error? Should `debugon` or `de\nbugon` be parsed as `debug on`, or as junk?
+// Errors and tokens
+// -----------------
+// The published specs say nothing about error conditions or about what to expect in case of error. 
+// For instance: Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should
+// it be an error? Should `debugon` be parsed as `debug on` or as junk? How about "usi usi"?
 // Since the spec talks about "tokens" (without defining those!), it seems reasonable to interpret 
 // all keywords as "tokens" and to require that all tokens must be delimited either by white-space 
 // (excluding newlines) or SOI (start of input) or EOI (end of input). 
 //
-// Details (from Shogidokoro)
-// --------------------------
-//
-// - When a SFEN string encodes an arbitrary position, the move number doesn't really make sense
-// anymore. So, we can arbitrarily set it to 1 (or expect it to be set to 1). This is not enforced
-// by the grammar here.
-// 
 // PEST/PEG
 // --------
 //
@@ -74,15 +68,16 @@ NL = _{ WHITESPACE | NEWLINE }
 SEP = _{"/"}
 
 // start 
-start = _{ SOI ~ other* ~ delimited_message+ ~ &EOI}
+start = _{SOI ~ line+ ~ &EOI}
+line = _{ other? ~ (delimited_message|junk) }
 
 delimited_message = _{ NL* ~ message ~ WHITESPACE* ~ NEWLINE }
 
-message = _{ gui_message | engine_message | other }
+message = _{ gui_message | engine_message | other}
 
 // other 
-nonl = { !NEWLINE ~ ANY }
-other = @{ (!gui_message ~ !engine_message ~ nonl)+ }
+other = @{ (!gui_message ~ !engine_message ~ !NEWLINE ~ ANY)+ }
+junk = @{ (!NEWLINE ~ ANY)* ~ NEWLINE}
 
 // message
 gui_message = _{
@@ -115,7 +110,7 @@ engine_message = _{
 // GuiMessage: GUI to engine
 //
 
-usi = ${ "usi" ~ &(NL) }
+usi = ${ "usi" ~ &NL }
 
 debug = ${ "debug" ~ (WS ~ ("on" | "off"))?  }
 
@@ -130,11 +125,11 @@ setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~
 
 register = ${ register_later | register_with_name_and_code }
 
-    register_later = ${ "register" ~ WS ~ "later" }
-    register_with_name_and_code = ${ "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
-    register_name = ${ register_token ~ (WS ~ register_token)* }
+    register_later = { "register" ~ WS ~ "later" }
+    register_with_name_and_code = { "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
+    register_name = { register_token ~ (WS ~ register_token)* }
     register_token = _{ !("code") ~ token }
-    register_code = ${ tokens }
+    register_code = { tokens }
 
 usinewgame = ${ "usinewgame" }
 

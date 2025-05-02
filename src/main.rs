@@ -21,14 +21,14 @@ fn main() {
         dbg(&input);
         println!();
 
-        let s = GuiMessageStream::new(&input).expect("Failed to parse stream");
+        let s = GuiMessageStream::new(&input);
 
         for msg in s {
             println!("{:?}", msg);
+            println!("{}", msg);
         }
 
-
-        /* 
+        /*
         let gui_msg = GuiMessage::parse(&input);
 
         if gui_msg.is_ok() {

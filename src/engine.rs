@@ -294,7 +294,7 @@ impl fmt::Display for InfoParam {
                     assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
                     write!(f, "score mate{}", bound)
                 }
-            }            
+            }
             Self::CurrMove(mv) => write!(f, "currmove {}", mv),
             Self::CurrMoveNum(n) => write!(f, "currmovenum {}", n),
             Self::HashFull(n) => write!(f, "hashfull {}", n),
