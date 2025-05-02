@@ -15,7 +15,7 @@ use std::fmt::Debug;
 use crate::engine::{
     BestMoveParams, EngineMessage, IdParams, InfoParam, OptionParam, ScoreBound, StatusCheck,
 };
-use crate::gui::{EngineParams, GameStatus, GuiMessage};
+use crate::gui::{EngineParams, GameStatus, GuiMessage, MateParam};
 
 #[derive(Parser)]
 #[grammar = "usi.pest"]
@@ -85,27 +85,45 @@ pub enum ParseError {
 impl GuiMessage {
     /// Parse a USI message from Gui to Engine.
     pub fn parse(s: &str) -> Result<Self, ParseError> {
-        let pairs: Pairs<Rule> = UsiParser::parse(Rule::start, s)?;
-
-        if let Some(p) = pairs.into_iter().next() {
-            let msg: Self = match p.as_rule() {
-                Rule::usi => Self::parse_usi()?,
-                Rule::debug => Self::parse_debug(p)?,
-                Rule::isready => Self::parse_isready()?,
-                Rule::setoption => Self::parse_setoption(p)?,
-                Rule::register => Self::parse_register(p)?,
-                Rule::usinewgame => Self::parse_usinewgame()?,
-                Rule::position => Self::parse_position(p)?,
-                Rule::go => Self::parse_go(p)?,
-                Rule::stop => Self::parse_stop()?,
-                Rule::ponderhit => Self::parse_ponderhit()?,
-                Rule::gameover => Self::parse_gameover(p)?,
-                Rule::quit => Self::parse_quit()?,
-                _ => Self::parse_unknown(p.as_str()),
-            };
-            return Ok(msg);
+        match UsiParser::parse(Rule::gui_message, s) {
+            Ok(pairs) => {
+                Self::inner_parse(pairs.into_iter().next().unwrap())
+            }
+            Err(err) => {
+                Err(ParseError::PestError(err))
+            }
         }
-        unreachable!()
+    }
+
+    pub fn parse_stream(s: &str, mut msgs: Vec<GuiMessage>) -> Result<(), ParseError> {
+        let pairs = UsiParser::parse(Rule::start, s)?;
+        for p in pairs {
+            let msg = Self::inner_parse(p);
+            match msg {
+                Ok(m) => msgs.push(m),
+                Err(_) => (),
+            }
+        }
+        Ok(())
+    }
+    
+    fn inner_parse(p: Pair<'_, Rule>) -> Result<Self, ParseError> {
+        let msg: Self = match p.as_rule() {
+            Rule::usi => Self::parse_usi()?,
+            Rule::debug => Self::parse_debug(p)?,
+            Rule::isready => Self::parse_isready()?,
+            Rule::setoption => Self::parse_setoption(p)?,
+            Rule::register => Self::parse_register(p)?,
+            Rule::usinewgame => Self::parse_usinewgame()?,
+            Rule::position => Self::parse_position(p)?,
+            Rule::go => Self::parse_go(p)?,
+            Rule::stop => Self::parse_stop()?,
+            Rule::ponderhit => Self::parse_ponderhit()?,
+            Rule::gameover => Self::parse_gameover(p)?,
+            Rule::quit => Self::parse_quit()?,
+            _ => Self::parse_unknown(p.as_str()),
+        };
+        return Ok(msg);
     }
 
     // unknown
@@ -201,7 +219,6 @@ impl GuiMessage {
 
     // go
     fn parse_go(pair: Pair<Rule>) -> Result<Self, ParseError> {
-        // let msg: String = as_string!(pair);
         let mut params = EngineParams::new();
 
         for sp in pair.into_inner() {
@@ -215,7 +232,14 @@ impl GuiMessage {
                 Rule::nodes => {
                     params = params.nodes(parse_digits::<u32>(sp)?);
                 }
-                Rule::mate => { // TODO: either digits or "infinite"
+                Rule::mate => {
+                    for spi in sp.into_inner() {
+                        match spi.as_rule() {
+                            Rule::millisecs => params = params.mate(MateParam::Timeout(parse_millisecs(spi)?)),
+                            Rule::infinite => params = params.mate(MateParam::Infinite),
+                            _ => unreachable!()
+                        }
+                    } 
                 }
                 Rule::byoyomi => {
                     params = params.byoyomi(parse_millisecs(sp)?);
@@ -284,10 +308,45 @@ impl GuiMessage {
     }
 }
 
+pub struct GuiMessageStream<'a> {
+    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+}
+
+impl<'a> GuiMessageStream<'a> {
+    /// Create a new `GuiMessageStream` from an input string
+    pub fn new(input: &'a str) -> Result<Self, ParseError> {
+        let pairs = UsiParser::parse(Rule::start, input)?; 
+        Ok(Self { pairs })
+    }
+}
+
+impl<'a> Iterator for GuiMessageStream<'a> {
+    type Item = GuiMessage;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(pair) = self.pairs.next() {
+            let res = GuiMessage::inner_parse(pair);
+            if res.is_ok() {
+                return Some(res.unwrap());
+            } 
+        } 
+        None
+    }
+}
+
+// EngineMessage parser
+
 impl EngineMessage {
     pub fn parse(s: &str) -> Result<Self, ParseError> {
-        let pairs: Pairs<Rule> = UsiParser::parse(Rule::start, s)?;
+        match UsiParser::parse(Rule::engine_message, s) {
+            Ok(pairs) => Self::inner_parse(pairs),
+            Err(err) => {
+                Err(ParseError::PestError(err))
+            }
+        }
+    }
 
+    pub fn inner_parse(pairs: Pairs<Rule>) -> Result<Self, ParseError> {
         if let Some(p) = pairs.into_iter().next() {
             let msg: Self = match p.as_rule() {
                 Rule::id => Self::parse_id(p)?,
@@ -615,25 +674,16 @@ impl EngineMessage {
             match sp.as_rule() {
                 Rule::integer => {
                     let s = as_str!(sp); // Extract the string representation
-                    v = Some(s.parse::<i32>().unwrap_or_else(|err| {
-                        unreachable!(
-                            "PEST grammar bug: failed to parse integer '{}': {:?}",
-                            s, err
-                        )
-                    }));
+                    v = Some(s.parse::<i32>().unwrap());
                 }
-                Rule::sign => {}
+                Rule::plus => bound = ScoreBound::MatePlus,
+                Rule::minus => bound = ScoreBound::MateMin,
                 Rule::lowerbound => bound = ScoreBound::Lower,
                 Rule::upperbound => bound = ScoreBound::Upper,
-                _ => unreachable!(), // really?
+                _ => unreachable!(),
             }
         }
-
-        if let Some(value) = v {
-            Ok(InfoParam::ScoreCp(value, bound))
-        } else {
-            Err(ParseError::SyntaxError)
-        }
+        Ok(InfoParam::ScoreMate(v, bound))
     }
 }
 
@@ -697,6 +747,10 @@ where
 fn parse_millisecs(pair: Pair<Rule>) -> Result<Duration, ParseError> {
     for sp in pair.into_inner() {
         if let Rule::millisecs = sp.as_rule() {
+            let milliseconds: i64 = as_str!(sp).parse::<i64>()?;
+            return Ok(Duration::milliseconds(milliseconds));
+        }
+        if let Rule::digits = sp.as_rule() {
             let milliseconds: i64 = as_str!(sp).parse::<i64>()?;
             return Ok(Duration::milliseconds(milliseconds));
         }

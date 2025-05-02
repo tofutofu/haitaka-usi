@@ -7,102 +7,85 @@
 //
 // Both the UCI protocol and the initial version of the USI protocol (the second link above)
 // are vague about details, edge cases and error conditions. The UCI protocol also made some
-// unfortunate, bad design decisions that make the protocol brittle and that make it more
-// difficult to implement the spec. In particular, the decision to _silently 
-// ignore_ leading and trailing garbage tokens seems rather questionable.
+// very unfortunate, bad design decisions that make the protocol brittle and make more difficult
+// to implement. In particular, the decision to _silently  ignore_ junk tokens was questionable.
 //
-// Requirements:
-//
+// Requirements
+// ------------
 // - All communication between engine and GUI is done by 7-bit ASCII text.
+//   This seems to imply that any non-ascii text should be rejected. The spec is not
+//   very clear if this is indeed the case for the `info string ...` and `info filename ...`
+//   commands. There is no length restriction on those two commands; in some cases they
+//   could pose security risks. In the grammar below I do allow non-ASCII characters in
+//   the junk portions (rule `other`).
 // - All command strings must end with '\n'. All viable end-of-line characters should be
-//   handled ('\n', '\r', or any combination).
-// - Arbitrary white space between tokens is allowed. Note the spec does not define "white space".
-//   I will defined it as any ascii white-space (' ', '\t', '\v', '\f').
-// - If the engine or the GUI receives an unknown command or token it should just ignore it 
-//   and try to parse the rest of the line. Examples: 
+//   handled ('\n', '\r', or any combination). PEST NEWLINE handles this.
+// - Arbitrary white space between tokens is allowed. The spec does not define "white space".
+//   I define it as any ASCII white-space (' ', '\t')(excluding '\v' and '\f').
+// - If the engine or the GUI receives an unknown command or token "it should just ignore it 
+//   and try to parse the rest of the line". Examples: 
 //   - `joho debug on\n` should switch the debug mode on given that joho is not defined, 
 //   - `debug joho on\n` will be undefined however.
-//   So, apparently this means that unparsable prefixes and suffixes of commands should be ignored.
+//   Apparently this means that unparsable prefixes should be ignored. In the grammar here
+//   I allow leading junk but no trailing junk on any given line.
 // - If the engine receives a command that is unexpected, for example `stop` when 
-//   the engine is not calculating, it should also just ignore it. (This doesn't involve syntax,
-//   but semantics.)
+//   the engine is not calculating, it should also just ignore it. This is not handled by
+//   the grammar, but can only be handled by the parser or Engine code.
 // - All options with fixed semantics start with the prefix "USI_". For instance, 
-//   the option which is named Hash in UCI is named USI_Hash in USI. 
+//   the option which is named Hash in UCI is named USI_Hash in USI. This is not handled by
+//   the grammar. The only restriction here is that option names should all be in ASCII and 
+//   should not contain any whitespace (which differs from the UCI protocol).
 // 
 // Case-sensitivity
 // ----------------
 // The ref doesn't specify whether or not commands are case-sensitive. Stockfish only accepts 
 // lowercased commands. I will also assume that all commands must be in lower case; I believe
-// this is in the spirit of the spec. But all user-specified strings, names, options are
-// treated as case-sensitive unless the spec explicitly demands case-insensitive handling (as it
-// does for options).
+// this is in the spirit of the spec. But all user-specified strings (names, option name and
+// string values) are treated as case-sensitive unless the spec explicitly demands case-insensitive
+// handling.
 //
-// Numbers
-// -------
-// I chose to not put any restrictions in the syntax on numbers. Checking that a value
-// makes sense should imo be done in the parser. One reason of not restricting this on a too 
-// low level is also that it gives the parser and engine more freedom
-// (e.g. the freedom to allow very long mate problems with over a 1000 moves as input).
-// A more principled reason is that the USI spec doesn't specify any restrictions. 
-//
+// Errors
+// ------
 // The published specs say practically nothing about error conditions. For instance:
 // Should `go ponderosa` be parsed as `go ponder`, ignoring the trailing `osa`? Or should it 
-// be an error? Should `debugon` and `de bugon` be parsed as `debug on`, or as garbage?
-// Since the spec talks about "tokens" (without defining those), it seems reasonable to interpret 
+// be an error? Should `debugon` or `de\nbugon` be parsed as `debug on`, or as junk?
+// Since the spec talks about "tokens" (without defining those!), it seems reasonable to interpret 
 // all keywords as "tokens" and to require that all tokens must be delimited either by white-space 
-// (excluding newlines) or SOI (start of input) or EOI (end of input). In the grammar below, 
-// I have enforced this by using a special "boundary" marker (`KB`) on messages.
+// (excluding newlines) or SOI (start of input) or EOI (end of input). 
 //
 // Details (from Shogidokoro)
 // --------------------------
 //
 // - When a SFEN string encodes an arbitrary position, the move number doesn't really make sense
-// anymore. So, we can arbitrarily set it to 1 (or expect it to be set to 1).
+// anymore. So, we can arbitrarily set it to 1 (or expect it to be set to 1). This is not enforced
+// by the grammar here.
 // 
+// PEST/PEG
+// --------
+//
+// - `ANY` matches any single Unicode code point, including whitespace and newline. This is not
+//    clearly documented, but can be verified in the fiddle editor (https://pest.rs/#editor). The
+//    grammar below only using ANY in junk messages; all regular messages need to be in ASCII.
+//
 
 WHITESPACE = _{ " " | "\t" }
 WS = _{ WHITESPACE+ }
 NL = _{ WHITESPACE | NEWLINE }
 SEP = _{"/"}
 
-// boundary
-KB = _{ WHITESPACE* ~ NEWLINE } 
-
 // start 
-start = _{ SOI ~ NL* ~ (line ~ NL*)+ ~ &EOI }
+start = _{ SOI ~ other* ~ delimited_message+ ~ &EOI}
 
-// we need to allow trailing and ending garbage
-line = _{ garbage? ~ message ~ garbage? }
+delimited_message = _{ NL* ~ message ~ WHITESPACE* ~ NEWLINE }
 
-garbage = _{ !NEWLINE ~ !start_of_command ~ ANY+ }
+message = _{ gui_message | engine_message | other }
 
-// garbage = _{ !start_of_command ~ ANY+ }
-
-start_of_command = _{ 
-    "usi" | 
-    "debug" | 
-    "isready" | 
-    "setoption" | 
-    "register" | 
-    "usinewgame" | 
-    "stop" | 
-    "ponderhit" | 
-    "quit" | 
-    "position" |
-    "go" | 
-    "id" | 
-    "usiok" | 
-    "readyok" | 
-    "bestmove" |
-    "copyprotection" |
-    "registration" |
-    "option" |
-    "info" |
-    "gameover"
-}
+// other 
+nonl = { !NEWLINE ~ ANY }
+other = @{ (!gui_message ~ !engine_message ~ nonl)+ }
 
 // message
-message = _{
+gui_message = _{
     usi | 
     debug | 
     isready | 
@@ -114,6 +97,10 @@ message = _{
     quit |
     position | 
     go |
+    gameover
+}
+
+engine_message = _{
     id | 
     usiok | 
     readyok | 
@@ -121,67 +108,62 @@ message = _{
     copyprotection | 
     registration | 
     option | 
-    info |
-    gameover
+    info
 }
 
 //
 // GuiMessage: GUI to engine
 //
 
-usi = ${ "usi" ~ &KB }
+usi = ${ "usi" ~ &(NL) }
 
-debug = ${ "debug" ~ (WS ~ ("on" | "off"))? ~ &KB }
+debug = ${ "debug" ~ (WS ~ ("on" | "off"))?  }
 
-isready = { "isready" ~ &KB }
+isready = ${ "isready"  }
 
 setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
 
-    // "The name and value of the option in id should not be case sensitive and CAN inlude spaces."
-    // `value` will consume until EOL
-    // if no value is found, then `name` may consume rest of line
-    setoption_name = ${ setoption_token ~ (WS ~ setoption_token)* }
-    setoption_token = _{ !("value") ~ token }
-    setoption_value = ${ tokens }
+    // "The name and value of the option in id should not be case sensitive and CAN NOT inlude spaces."
+    // That _seems_ to mean that the value can also not include spaces.
+    setoption_name = ${ !("value") ~ token }
+    setoption_value = ${ token }
 
-register = { register_later | register_with_name_and_code }
+register = ${ register_later | register_with_name_and_code }
 
-    register_later = ${ "register" ~ WS ~ "later" ~ &KB}
+    register_later = ${ "register" ~ WS ~ "later" }
     register_with_name_and_code = ${ "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
-
-    // `code` consume until EOL
     register_name = ${ register_token ~ (WS ~ register_token)* }
     register_token = _{ !("code") ~ token }
     register_code = ${ tokens }
 
-usinewgame = { "usinewgame" ~ &KB}
+usinewgame = ${ "usinewgame" }
 
-stop = { "stop" ~ &KB }
+stop = ${ "stop"  }
 
-quit = { "quit" ~ &KB }
+quit = ${ "quit"  }
 
-ponderhit = { "ponderhit" ~ &KB }
+ponderhit = ${ "ponderhit"  }
 
-gameover = ${ "gameover" ~ WS ~ (win | lose | draw) ~ &KB }
+gameover = ${ "gameover" ~ WS ~ (win | lose | draw)  }
     
     win = { "win" }
     lose = { "lose" }
     draw = { "draw" }
 
-position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)? ~ &KB }
+position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)?  }
 
-    startpos = ${ "startpos" }
-    sfenpos = ${ "sfen" ~ WS ~ sfen_board ~ WS ~ sfen_color ~ WS ~ sfen_hands ~ (WS ~ sfen_move_num)? }
+    startpos = { "startpos" }
+    sfenpos = { "sfen" ~ WS ~ sfen_board ~ WS ~ sfen_color ~ WS ~ sfen_hands ~ (WS ~ sfen_move_num)? }
 
-    sfen_board = ${ (sfen_rank ~ SEP){8} ~ sfen_rank }
-    sfen_color = ${ "w" | "b" }
-    sfen_hands = ${ sfen_black_hand ~ sfen_white_hand? | sfen_white_hand | sfen_empty_hand }
-    sfen_move_num = ${ digits }  
+    sfen_board = { (sfen_rank ~ SEP){8} ~ sfen_rank }
+    sfen_color = { "w" | "b" }
+    sfen_hands = { sfen_black_hand ~ sfen_white_hand? | sfen_white_hand | sfen_empty_hand }
+    sfen_move_num = { digits }  
 
-    sfen_rank = ${ ((prom? ~ (white_piece | black_piece)) | file){1,9} }
+    sfen_rank = { ((prom? ~ (white_piece | black_piece)) | file){1,9} }
 
-    sfen_black_hand = ${ (npieces? ~ black_hand_piece){1,6} }
-    sfen_white_hand = ${ (npieces? ~ white_hand_piece){1,6} }
+    sfen_black_hand = { (npieces? ~ black_hand_piece){1,6} }
+    sfen_white_hand = { (npieces? ~ white_hand_piece){1,6} }
     sfen_empty_hand = { "-" }
 
     prom = { "+" }
@@ -194,17 +176,17 @@ position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ move
     npieces = { "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | 
                 "10" | "11" | "12" | "13" | "14" | "15" | "16" | "17" | "18" }
 
-    moves = ${ one_move ~ (WS ~ one_move)* }
+    moves = { one_move ~ (WS ~ one_move)* }
 
     one_move = { drop | board_move }
-    drop = ${ black_piece ~ "*" ~ square }
-    board_move = ${ square ~ square ~ "+"? }
+    drop = { black_piece ~ "*" ~ square }
+    board_move = { square ~ square ~ "+"? }
 
-    square = ${ file ~ rank }
+    square = { file ~ rank }
     file = { '1'..'9' }
     rank = { 'a'..'i' }
 
-go = ${ "go" ~ (WS ~ go_sub_cmd)* ~ &KB }
+go = ${ "go" ~ (WS ~ go_sub_cmd)*  }
 
     go_sub_cmd = _{
         searchmoves |          
@@ -222,18 +204,19 @@ go = ${ "go" ~ (WS ~ go_sub_cmd)* ~ &KB }
         infinite
     }
 
-    searchmoves = ${ "searchmoves" ~ WS ~ moves}
+    searchmoves = { "searchmoves" ~ WS ~ moves}
     ponder = { "ponder" }
-    movetime = ${ "movetime" ~ WS ~ millisecs }
-    byoyomi = ${ "byoyomi" ~ WS ~ millisecs }
-    wtime = ${ "wtime" ~ WS ~ millisecs }
-    btime = ${ "btime" ~ WS ~ millisecs }
-    winc = ${ "winc" ~ WS ~ millisecs }
-    binc = ${ "binc" ~ WS ~ millisecs }
-    movestogo = ${ "movestogo" ~ WS ~ digits }
-    depth = ${ "depth" ~ WS ~ digits }
-    nodes = ${ "nodes" ~ WS ~ digits }
-    mate = ${ "mate" ~ WS ~ digits }
+    movetime = { "movetime" ~ WS ~ millisecs }
+    byoyomi = { "byoyomi" ~ WS ~ millisecs }
+    wtime = { "wtime" ~ WS ~ millisecs }
+    btime = { "btime" ~ WS ~ millisecs }
+    winc = { "winc" ~ WS ~ millisecs }
+    binc = { "binc" ~ WS ~ millisecs }
+    movestogo = { "movestogo" ~ WS ~ digits }
+    depth = { "depth" ~ WS ~ digits }
+    nodes = { "nodes" ~ WS ~ digits }
+    // following Shogidokoro semantics
+    mate = { "mate" ~ WS ~ (infinite | millisecs) }
     infinite = { "infinite" }
 
 //
@@ -246,36 +229,21 @@ id = ${ "id" ~ WS ~ (id_name | id_author) }
     id_name = ${ "name" ~ WS ~ tokens }
     id_author = ${ "author" ~ WS ~ tokens }
 
-usiok = { "usiok" ~ &KB }
+usiok = { "usiok"  }
 
-readyok = { "readyok" ~ &KB }
+readyok = { "readyok"  }
 
-bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)? ~ &KB }
+bestmove = ${ "bestmove" ~ WS ~ one_move ~ (WS ~ ponder_move)?  }
 
     ponder_move = { "ponder" ~ WS ~ one_move }
 
-copyprotection = ${ "copyprotection" ~ WS ~ status_check ~ &KB }
+copyprotection = ${ "copyprotection" ~ WS ~ status_check  }
 
-registration = ${ "registration" ~ WS ~ status_check ~ &KB }
+registration = ${ "registration" ~ WS ~ status_check  }
 
     status_check = { "checking" | "ok" | "error" }
 
-// Option examples
-// ---------------
-// option name Nullmove type check default true\n
-// option name Selectivity type spin default 2 min 0 max 4\n
-// option name Style type combo default Normal var Solid var Normal var Risky\n
-// option name NalimovPath type string default c:\\n
-// option name Clear Hash type button\n
-//
-// Note: "One string will be sent for each parameter."
-// "Certain options have a fixed value for id, which means that the semantics of this option is fixed."
-// For Shogi those have prefix "USI_" rather than "UCI_".
-
-// Spaces are not allowed in option names. It seems they are allowed in option values (in particular in
-// the 'string' or 'filename' option). Nothing is specified about any escape characters.
-
-option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_option | button_option | filename_option) ~ &KB }
+option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_option | button_option | filename_option)  }
 
     check_option = ${ option_name ~ WS ~ "type" ~ WS ~ "check" ~ (WS ~ "default" ~ WS ~ check_default)? }
     spin_option = ${ option_name ~ WS ~ "type" ~ WS ~ "spin" ~ (WS ~ "default" ~ WS ~ spin_default)? ~ (WS ~ spin_min)? ~ (WS ~ spin_max)? }
@@ -284,6 +252,7 @@ option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_
     button_option = ${ option_name ~ WS ~ "type" ~ WS ~ "button" }
     filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ default)? }
 
+    // option_name can not contain spaces
     option_name = ${ "name" ~ WS ~ name_token }
     name_token = ${ !("type") ~ token }
     
@@ -295,31 +264,7 @@ option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_
     var = { !("var") ~ var_token }
     var_token = ${ !("default" | "var") ~ token}
     
-// Info examples
-// -------------
-//  info currmove e2e4 currmovenumber 1
-// 	info depth 12 nodes 123456 nps 100000
-//
-// The spec says that "all infos belonging to the pv should be sent together", e.g.
-//
-//  info depth 2 score cp 214 time 1242 nodes 2124 nps 34928 pv 2g2f 8c8d 2f2e 8d8e
-//
-// however, it forgets to mention which infos always "belong to" the pv.
-// The 'pv' apparently always ends an info command, so it can also not go togeter with the
-// 'info string ...' message (Shogidokoro).
-//
-//  info depth 1 seldepth 0
-//  info score cp 13  depth 1 nodes 13 time 15 pv 2g2f
-//  info depth 2 seldepth 2
-//  info nps 15937
-//  info score cp 14  depth 2 nodes 255 time 15 pv 2g2f 8c8d
-//  info depth 2 seldepth 7 nodes 255
-//  info depth 3 seldepth 7
-//  info nps 26437
-//  info score cp 20  depth 3 nodes 423 time 15 pv 2g2f P*8f
-//  info nps 41562
-
-info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
+info = ${ "info" ~ (WS ~ info_attr)+  }
 
     info_attr = _{
         info_depth |
@@ -355,41 +300,41 @@ info = ${ "info" ~ (WS ~ info_attr)+ ~ &KB }
     info_multipv = ${ "multipv" ~ WS ~ digits }
     info_refutation = ${ "refutation" ~ WS ~ moves }
 
-    // "currline: If cpunr is greater than 1, always send all k lines in k strings together."
+    // "Currline: If cpunr is greater than 1, always send all k lines in k strings together."
     // I assume that means, send multiple new-line separated `currline` messages.
-    // `cpunr` should then only occur at most once in each expression. The quote illustrates
-    // the extreme vagueness of the spec.
+    // `cpunr` should then only occur at most once in each expression. 
     info_currline = ${ "currline" ~ WS ~ (digits ~ WS)? ~ moves }
 
-    // Assuming that `score cp x` and `score mate x` are never sent as `info score cp x mate y`. 
+    // I assume that `score cp x` and `score mate x` are never sent as `info score cp x mate y`. 
     // Shogidokoro: `score mate +` means the engine has a discovered a forced mate, but cannot tell
     // how many moves. Similarly `score mate -` means the engine has discovered that the opponent
     // has a forced mate against the engine, but it cannot tell how many moves this has.
     info_score_cp = ${ "score" ~ WS ~ "cp" ~ WS ~ integer ~ (WS ~ (lowerbound | upperbound))? }
-    info_score_mate = ${ "score" ~ WS ~ "mate" ~ WS ~ ((integer ~ (WS ~ (lowerbound | upperbound))?) | sign) }
+    info_score_mate = ${ "score" ~ WS ~ "mate" ~ WS ~ ((integer ~ (WS ~ (lowerbound | upperbound))?) | (plus|minus)) }
 
         lowerbound = { "lowerbound" }
         upperbound = { "upperbound" }
 
-    // consumes until EOL
+    // consumes all tokens until EOL
     info_string = ${ "string" ~ WS ~ tokens }
 
 //
 // helpers 
 // 
 
-// a token is a contiguous sequence of chars, but with no whitespace or newlines
-token = @{ (!(WHITESPACE | NEWLINE) ~ ANY)+ }
+// a token is a contiguous sequence of ascii alpha numeric characters
+token = @{ ASCII_ALPHANUMERIC+ }
 
-// tokens is a sequence of white-space-separated tokens (but not allowing newlines)
+// tokens is a sequence of one or more white-space-separated tokens (not allowing newlines)
 tokens = @{ token ~ (WS ~ token)* }
 
 // digits is a contiguous sequence of ascii digits
 digits = @{ ASCII_DIGIT+ }
 
 millisecs = { digits }
-integer = { sign? ~ digits }
-sign = { "+" | "-" }
+integer = { (plus | minus)? ~ digits }
+plus = { "+" }
+minus = { "-" }
 
 
 

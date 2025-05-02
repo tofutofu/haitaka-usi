@@ -244,7 +244,7 @@ impl fmt::Display for GuiMessage {
             GuiMessage::PonderHit => write!(f, "ponderhit"),
             GuiMessage::GameOver(status) => write!(f, "gameover {}", status),
             GuiMessage::Quit => write!(f, "quit"),
-            GuiMessage::Unknown(s) => write!(f, "UNKNOWN {}", s),
+            GuiMessage::Unknown(s) => write!(f, "UNKNOWN \"{}\"", s),
         }
     }
 }

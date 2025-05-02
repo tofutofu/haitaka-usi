@@ -121,7 +121,7 @@ pub enum InfoParam {
     ScoreCp(i32, ScoreBound),
 
     /// The info score mate ...' message.
-    ScoreMate(i32, ScoreBound),
+    ScoreMate(Option<i32>, ScoreBound),
 
     /// The `info currmove` message (current move).
     CurrMove(Move),
@@ -175,7 +175,7 @@ impl fmt::Display for EngineMessage {
             EngineMessage::Registration(state) => write!(f, "register {}", state),
             EngineMessage::Option(option) => write!(f, "option {}", option),
             EngineMessage::Info(info) => write!(f, "info {}", format_vec!(info)),
-            EngineMessage::Unknown(s) => write!(f, "UNKNOWN {}", s),
+            EngineMessage::Unknown(s) => write!(f, "UNKNOWN \"{}\"", s),
         }
     }
 }
@@ -287,7 +287,14 @@ impl fmt::Display for InfoParam {
             Self::Pv(mvs) => write!(f, "pv {}", format_vec!(mvs)),
             Self::MultiPv(n) => write!(f, "multipv {}", n),
             Self::ScoreCp(cp, bound) => write!(f, "score cp {}{}", cp, bound),
-            Self::ScoreMate(mate, bound) => write!(f, "score mate {}{}", mate, bound),
+            Self::ScoreMate(plies, bound) => {
+                if let Some(plies) = plies {
+                    write!(f, "score mate {}{}", plies, bound)
+                } else {
+                    assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
+                    write!(f, "score mate{}", bound)
+                }
+            }            
             Self::CurrMove(mv) => write!(f, "currmove {}", mv),
             Self::CurrMoveNum(n) => write!(f, "currmovenum {}", n),
             Self::HashFull(n) => write!(f, "hashfull {}", n),
@@ -311,6 +318,8 @@ impl fmt::Display for ScoreBound {
         match self {
             Self::Lower => write!(f, " lowerbound"),
             Self::Upper => write!(f, " upperbound"),
+            Self::MateMin => write!(f, " -"),
+            Self::MatePlus => write!(f, " +"),
             _ => write!(f, ""),
         }
     }
