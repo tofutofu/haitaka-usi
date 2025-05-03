@@ -79,7 +79,7 @@ message = _{ gui_message | engine_message | other}
 other = @{ (!gui_message ~ !engine_message ~ !NEWLINE ~ ANY)+ }
 junk = @{ (!NEWLINE ~ ANY)* ~ NEWLINE}
 
-// message
+// gui message
 gui_message = _{
     usi | 
     debug | 
@@ -95,6 +95,7 @@ gui_message = _{
     gameover
 }
 
+// engine message
 engine_message = _{
     id | 
     usiok | 
@@ -164,13 +165,11 @@ position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ move
     prom = { "+" }
     white_piece = { "k" | "r"  | "b" | "g" | "s" | "n"  | "l"  | "p" }
     black_piece = { "K" | "R"  | "B" | "G" | "S" | "N"  | "L"  | "P" }
-    white_hand_piece = { "r"  | "b" | "s" | "n"  | "l"  | "p" }
-    black_hand_piece = { "R"  | "B" | "S" | "N"  | "L"  | "P" }
-
-    // "1" should really not be used, but I'll allow it
-    npieces = { "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | 
-                "10" | "11" | "12" | "13" | "14" | "15" | "16" | "17" | "18" }
-
+    white_hand_piece = { "r"  | "b" | "g" | "s" | "n"  | "l"  | "p" }
+    black_hand_piece = { "R"  | "B" | "G" | "S" | "N"  | "L"  | "P" }
+    npieces = { "18" | "17" | "16" | "15" | "14" | "13" | "12" | "11" | "10"
+              | "9" | "8" | "7" | "6" | "5" | "4" | "3" | "2" | "1" }
+    
     moves = { one_move ~ (WS ~ one_move)* }
 
     one_move = { drop | board_move }
@@ -242,23 +241,22 @@ option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_
 
     check_option = ${ option_name ~ WS ~ "type" ~ WS ~ "check" ~ (WS ~ "default" ~ WS ~ check_default)? }
     spin_option = ${ option_name ~ WS ~ "type" ~ WS ~ "spin" ~ (WS ~ "default" ~ WS ~ spin_default)? ~ (WS ~ spin_min)? ~ (WS ~ spin_max)? }
-    combo_option = ${ option_name ~ WS ~ "type" ~ WS ~ "combo" ~ (WS ~ "default" ~ WS ~ default)? ~ (WS ~ "var" ~ WS ~ var)* }
-    // spec doesn't clearly say whether or not a 'string' and 'filename' option always require a default
+    combo_option = ${ option_name ~ WS ~ "type" ~ WS ~ "combo" ~ (WS ~ "default" ~ WS ~ combo_default?) ~ (WS ~ "var" ~ WS ~ var_token)* }
+    // the spec doesn't clearly say whether or not a 'string' and 'filename' option always require a default
     // it seems they do (but I'm going to leave it as optional as seems to be the general interpretation)
-    string_option = ${ option_name ~ WS ~ "type" ~ WS ~ "string" ~ (WS ~ "default" ~ WS ~ default)? }
+    string_option = ${ option_name ~ WS ~ "type" ~ WS ~ "string" ~ (WS ~ "default" ~ WS ~ token)? }
     button_option = ${ option_name ~ WS ~ "type" ~ WS ~ "button" }
-    filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ default)? }
+    filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ token)? }
 
     // option_name may not contain spaces
     option_name = ${ "name" ~ WS ~ name_token }
     name_token = ${ !("type") ~ token }
     
-    check_default = { "true" | "false" }
-    spin_default = { integer }
+    check_default = { ^"true" | ^"false" }
+    spin_default = { integer }    
     spin_min = ${ "min" ~ WS ~ integer }
     spin_max = ${ "max" ~ WS ~ integer }
-    default = ${ "default" ~ WS ~ var_token }
-    var = { !("var") ~ var_token }
+    combo_default = ${ var_token }
     var_token = ${ !("default" | "var") ~ token}
     
 info = ${ "info" ~ (WS ~ info_attr)+  }
@@ -319,10 +317,10 @@ info = ${ "info" ~ (WS ~ info_attr)+  }
 // helpers 
 // 
 
-// a token is a contiguous sequence of ascii alpha numeric characters
-token = @{ ASCII_ALPHANUMERIC+ }
+// a token is a contiguous sequence of printable 7-bit ASCII characters (excluding whitespace)
+token = @{ ('!'..'~')+ }
 
-// tokens is a sequence of one or more white-space-separated tokens (not allowing newlines)
+// tokens is a sequence of one or more white-space-separated tokens (excluding newlines)
 tokens = @{ token ~ (WS ~ token)* }
 
 // digits is a contiguous sequence of ascii digits

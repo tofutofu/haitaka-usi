@@ -1,10 +1,26 @@
+use haitaka_usi::gui::*;
 use haitaka_usi::parser::*;
-//use haitaka_usi::gui::*;
 //use haitaka_usi::engine::*;
 use std::io::{self, Read, Write};
 
 fn main() {
     println!("Hello USI");
+
+    //let res = GuiMessage::parse("yoho usi\n");
+    //println!("{:?}", res);
+
+    //let msg = GuiMessage::SetOption { name: "USI_Hash".to_string(), value: Some("128".to_string()) };
+    //println!("{msg}");
+
+    let msg = GuiMessage::parse_first_valid("yoho\nhey usi ");
+    println!("{:?}", msg);
+
+
+
+    // let output = format!("{msg}\n");
+
+    //println!("{msg:?}\n");
+    //println!("{msg}\n");
 
     loop {
         print!(">>> ");

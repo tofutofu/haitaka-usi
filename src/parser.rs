@@ -1,4 +1,261 @@
-// parser.rs
+//! This module implements the USI parser.
+//!
+//! The [PEG grammar](https://en.wikipedia.org/wiki/Parsing_expression_grammar) used by this crate:
+//! ```text
+//! WHITESPACE = _{ " " | "\t" }
+//! WS = _{ WHITESPACE+ }
+//! NL = _{ WHITESPACE | NEWLINE }
+//! SEP = _{"/"}
+//!
+//! // start
+//! start = _{SOI ~ line+ ~ &EOI}
+//! line = _{ other? ~ (delimited_message | junk) }
+//!
+//! delimited_message = _{ NL* ~ message ~ WHITESPACE* ~ NEWLINE }
+//! message = _{ gui_message | engine_message | other}
+//!
+//! // other
+//! other = @{ (!gui_message ~ !engine_message ~ !NEWLINE ~ ANY)+ }
+//! junk = @{ (!NEWLINE ~ ANY)* ~ NEWLINE}
+//!
+//! // gui message
+//! gui_message = _{
+//!     usi |
+//!     debug |
+//!     isready |
+//!     setoption |
+//!     register |
+//!     usinewgame |
+//!     stop |
+//!     ponderhit |
+//!     quit |
+//!     position |
+//!     go |
+//!     gameover
+//! }
+//!
+//! // engine message
+//! engine_message = _{
+//!     id |
+//!     usiok |
+//!     readyok |
+//!     bestmove |
+//!     copyprotection |
+//!     registration |
+//!     option |
+//!     info
+//! }
+//!
+//! //
+//! // GuiMessage: GUI to engine
+//! //
+//!
+//! usi = ${ "usi" ~ &NL }
+//!
+//! debug = ${ "debug" ~ (WS ~ ("on" | "off"))?  }
+//!
+//! isready = ${ "isready"  }
+//!
+//! setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~ WS ~ setoption_value)? }
+//!
+//!     setoption_name = ${ !("value") ~ token }
+//!     setoption_value = ${ token }
+//!
+//! register = ${ register_later | register_with_name_and_code }
+//!
+//!     register_later = { "register" ~ WS ~ "later" }
+//!     register_with_name_and_code = { "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }
+//!     register_name = { register_token ~ (WS ~ register_token)* }
+//!     register_token = _{ !("code") ~ token }
+//!     register_code = { tokens }
+//!
+//! usinewgame = ${ "usinewgame" }
+//!
+//! stop = ${ "stop"  }
+//!
+//! quit = ${ "quit"  }
+//!
+//! ponderhit = ${ "ponderhit"  }
+//!
+//! gameover = ${ "gameover" ~ WS ~ (win | lose | draw)  }
+//!     
+//!     win = { "win" }
+//!     lose = { "lose" }
+//!     draw = { "draw" }
+//!
+//! position = ${ "position" ~ WS ~ (startpos | sfenpos) ~ (WS ~ "moves" ~ WS ~ moves)?  }
+//!
+//!     startpos = { "startpos" }
+//!     sfenpos = { "sfen" ~ WS ~ sfen_board ~ WS ~ sfen_color ~ WS ~ sfen_hands ~ (WS ~ sfen_move_num)? }
+//!
+//!     sfen_board = { (sfen_rank ~ SEP){8} ~ sfen_rank }
+//!     sfen_color = { "w" | "b" }
+//!     sfen_hands = { sfen_black_hand ~ sfen_white_hand? | sfen_white_hand | sfen_empty_hand }
+//!     sfen_move_num = { digits }  
+//!
+//!     sfen_rank = { ((prom? ~ (white_piece | black_piece)) | file){1,9} }
+//!
+//!     sfen_black_hand = { (npieces? ~ black_hand_piece){1,6} }
+//!     sfen_white_hand = { (npieces? ~ white_hand_piece){1,6} }
+//!     sfen_empty_hand = { "-" }
+//!
+//!     prom = { "+" }
+//!     white_piece = { "k" | "r"  | "b" | "g" | "s" | "n"  | "l"  | "p" }
+//!     black_piece = { "K" | "R"  | "B" | "G" | "S" | "N"  | "L"  | "P" }
+//!     white_hand_piece = { "r"  | "b" | "s" | "n"  | "l"  | "p" }
+//!     black_hand_piece = { "R"  | "B" | "S" | "N"  | "L"  | "P" }
+//!
+//!     npieces = { "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" |
+//!                 "10" | "11" | "12" | "13" | "14" | "15" | "16" | "17" | "18" }
+//!
+//!     moves = { one_move ~ (WS ~ one_move)* }
+//!
+//!     one_move = { drop | board_move }
+//!     drop = { black_piece ~ "*" ~ square }
+//!     board_move = { square ~ square ~ "+"? }
+//!
+//!     square = { file ~ rank }
+//!     file = { '1'..'9' }
+//!     rank = { 'a'..'i' }
+//!
+//! go = ${ "go" ~ (WS ~ go_sub_cmd)*  }
+//!
+//!     go_sub_cmd = _{
+//!         searchmoves |          
+//!         ponder |
+//!         movetime |
+//!         byoyomi |
+//!         movestogo |
+//!         wtime |
+//!         btime |
+//!         winc |
+//!         binc |
+//!         depth |
+//!         nodes |
+//!         mate |
+//!         infinite
+//!     }
+//!
+//!     searchmoves = { "searchmoves" ~ WS ~ moves}
+//!     ponder = { "ponder" }
+//!     movetime = { "movetime" ~ WS ~ millisecs }
+//!     byoyomi = { "byoyomi" ~ WS ~ millisecs }
+//!     wtime = { "wtime" ~ WS ~ millisecs }
+//!     btime = { "btime" ~ WS ~ millisecs }
+//!     winc = { "winc" ~ WS ~ millisecs }
+//!     binc = { "binc" ~ WS ~ millisecs }
+//!     movestogo = { "movestogo" ~ WS ~ digits }
+//!     depth = { "depth" ~ WS ~ digits }
+//!     nodes = { "nodes" ~ WS ~ digits }
+//!     // following Shogidokoro semantics
+//!     mate = { "mate" ~ WS ~ (infinite | millisecs) }
+//!     infinite = { "infinite" }
+//!
+//! //
+//! // EngineMessage: Engine to GUI
+//! //
+//!
+//! id = ${ "id" ~ WS ~ (id_name | id_author) }
+//!
+//!     id_name = ${ "name" ~ WS ~ tokens }
+//!     id_author = ${ "author" ~ WS ~ tokens }
+//!
+//! usiok = { "usiok"  }
+//!
+//! readyok = { "readyok"  }
+//!
+//! bestmove = ${ "bestmove" ~ WS ~ ((one_move ~ (WS ~ ponder_move)?) | resign | win)  }
+//!
+//!     ponder_move = { "ponder" ~ WS ~ one_move }
+//!     resign = { "resign" }
+//!
+//! copyprotection = ${ "copyprotection" ~ WS ~ status_check  }
+//!
+//! registration = ${ "registration" ~ WS ~ status_check  }
+//!
+//!     status_check = { "checking" | "ok" | "error" }
+//!
+//! option = ${ "option" ~ WS ~ (check_option | spin_option | combo_option | string_option | button_option | filename_option)  }
+//!
+//!     check_option = ${ option_name ~ WS ~ "type" ~ WS ~ "check" ~ (WS ~ "default" ~ WS ~ check_default)? }
+//!     spin_option = ${ option_name ~ WS ~ "type" ~ WS ~ "spin" ~ (WS ~ "default" ~ WS ~ spin_default)? ~ (WS ~ spin_min)? ~ (WS ~ spin_max)? }
+//!     combo_option = ${ option_name ~ WS ~ "type" ~ WS ~ "combo" ~ (WS ~ "default" ~ WS ~ default)? ~ (WS ~ "var" ~ WS ~ var)* }
+//!     string_option = ${ option_name ~ WS ~ "type" ~ WS ~ "string" ~ (WS ~ "default" ~ WS ~ default)? }
+//!     button_option = ${ option_name ~ WS ~ "type" ~ WS ~ "button" }
+//!     filename_option = ${ option_name ~ WS ~ "type" ~ WS ~ "filename" ~ (WS ~ "default" ~ WS ~ default)? }
+//!
+//!     option_name = ${ "name" ~ WS ~ name_token }
+//!     name_token = ${ !("type") ~ token }
+//!     
+//!     check_default = { "true" | "false" }
+//!     spin_default = { integer }
+//!     spin_min = ${ "min" ~ WS ~ integer }
+//!     spin_max = ${ "max" ~ WS ~ integer }
+//!     default = ${ "default" ~ WS ~ var_token }
+//!     var = { !("var") ~ var_token }
+//!     var_token = ${ !("default" | "var") ~ token}
+//!     
+//! info = ${ "info" ~ (WS ~ info_attr)+  }
+//!
+//!     info_attr = _{
+//!         info_depth |
+//!         info_seldepth |
+//!         info_time |
+//!         info_nodes |
+//!         info_currmovenum |
+//!         info_currmove |
+//!         info_hashfull |
+//!         info_nps |
+//!         info_cpuload |
+//!         info_pv |
+//!         info_multipv |
+//!         info_refutation |
+//!         info_currline |
+//!         info_score_cp |
+//!         info_score_mate |
+//!         info_string
+//!     }
+//!
+//!     info_depth = ${ "depth" ~ WS ~ digits }
+//!     info_seldepth = ${ "seldepth" ~ WS ~ digits }
+//!     info_time = ${ "time" ~ WS ~ millisecs }
+//!     info_nodes = ${ "nodes" ~ WS ~ digits }
+//!     info_currmove = ${ "currmove" ~ WS ~ one_move }
+//!     info_currmovenum = ${ "currmovenum" ~ WS ~ digits }
+//!     info_hashfull = ${ "hashfull" ~ WS ~ digits }
+//!     info_nps = ${ "nps" ~ WS ~ digits }
+//!     info_cpuload = ${ "cpuload" ~ WS ~ digits }    
+//!     info_pv = ${ "pv" ~ WS ~ moves }
+//!     info_multipv = ${ "multipv" ~ WS ~ digits }
+//!     info_refutation = ${ "refutation" ~ WS ~ moves }
+//!     info_currline = ${ "currline" ~ WS ~ (digits ~ WS)? ~ moves }
+//!     info_score_cp = ${ "score" ~ WS ~ "cp" ~ WS ~ integer ~ (WS ~ (lowerbound | upperbound))? }
+//!     info_score_mate = ${ "score" ~ WS ~ "mate" ~ WS ~ ((integer ~ (WS ~ (lowerbound | upperbound))?) | (plus|minus)) }
+//!
+//!         lowerbound = { "lowerbound" }
+//!         upperbound = { "upperbound" }
+//!
+//!     info_string = ${ "string" ~ WS ~ tokens }
+//!
+//! //
+//! // helpers
+//! //
+//!
+//! // a token is a contiguous sequence of printable 7-bit ASCII characters (excluding whitespace)
+//! token = @{ ('!'..'~')+ }
+//!
+//! // tokens is a sequence of one or more white-space-separated tokens (excluding newlines)
+//! tokens = @{ token ~ (WS ~ token)* }
+//!
+//! // digits is a contiguous sequence of ascii digits
+//! digits = @{ ASCII_DIGIT+ }
+//!
+//! millisecs = { digits }
+//! integer = { (plus | minus)? ~ digits }
+//! plus = { "+" }
+//! minus = { "-" }
+//! ```
+
 #![allow(clippy::result_large_err)]
 
 use core::str::FromStr;
@@ -58,19 +315,36 @@ macro_rules! convert_empty {
     };
 }
 
+
+
 impl GuiMessage {
-    /// Parse one USI message, sent by the GUI and to be received by the Engine.
+    /// Parse one USI message, sent by the GUI and received by the Engine.
     ///
     /// If the string contains multiple messages, only the first one is returned.
+    /// 
+    /// Note that all USI protocol messages must be terminated by a newline ('\n', '\r' or '\r\n').
+    /// This function will return a ParseError if the input string does not end with either
+    /// a newline or newline followed by ascii whitespace.
     ///
-    /// SAFETY: The parser should be able to process any input. An input string `s` that does not conform
-    /// to the USI protocol is returned as `GuiMessage::Unknown(s)``.
+    /// SAFETY: The parser should be able to process any newline-terminated input. An input string 
+    /// `input` that does not conform to the USI protocol is returned as `Ok(EngineMessage::Unknown(input))`.
     ///
-    pub fn parse(s: &str) -> Result<Self, PestError<Rule>> {
-        match UsiParser::parse(Rule::gui_message, s) {
+    pub fn parse(input: &str) -> Result<Self, PestError<Rule>> {
+        match UsiParser::parse(Rule::start, input) {
             Ok(pairs) => Ok(Self::inner_parse(pairs.into_iter().next().unwrap())),
             Err(err) => Err(err),
         }
+    }
+
+    /// Parses the input and returns the first valid protocol GUI message, skipping Unknowns.
+    /// Returns `None` if no valid message is found.
+    /// 
+    /// # Panics
+    /// 
+    /// This function will panic if the input string is not newline terminated.
+    ///
+    pub fn parse_first_valid(input: &str) -> Option<Self> {
+        GuiMessageStream::new(input).find(|msg| !matches!(msg, GuiMessage::Unknown(_)))
     }
 
     fn inner_parse(p: Pair<'_, Rule>) -> Self {
@@ -171,7 +445,11 @@ impl GuiMessage {
                     assert!(sfen.is_none());
                 }
                 Rule::sfenpos => {
-                    sfen = Some(as_string!(sp));
+                    sfen = Some(as_str!(sp)
+                        .strip_prefix("sfen ")
+                        .unwrap()
+                        .trim()
+                        .to_string());
                 }
                 Rule::moves => {
                     moves = Some(parse_moves(sp));
@@ -272,19 +550,21 @@ impl GuiMessage {
 
 /// The GuiMessageStream struct enables iteration over a multi-line text string.
 pub struct GuiMessageStream<'a> {
-    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+    /// Inner PEST iterator over grammar Rules
+    pairs: Pairs<'a, Rule>,
 }
 
 impl<'a> GuiMessageStream<'a> {
     /// Create a new `GuiMessageStream` from an input string.
+    ///
+    /// SAFETY: Since the grammar is designed to process any input, this should never fail.
     pub fn new(input: &'a str) -> Self {
         Self::parse(input)
     }
 
     /// Parse a multi-line input string and return a GuiMessageStream instance.
     ///
-    /// SAFETY: Since the parser should be able to handle any input, this should
-    /// never fail.
+    /// SAFETY: Since the parser should be able to handle any input, this should never fail.
     pub fn parse(input: &'a str) -> Self {
         Self::try_parse(input).expect("Internal error: Failed to initialize UsiParser.")
     }
@@ -313,18 +593,33 @@ impl Iterator for GuiMessageStream<'_> {
 // EngineMessage parser
 
 impl EngineMessage {
-    /// Parse one USI message, sent by the Engine and to be received by the GUI.
+    /// Parse one USI message, sent by the Engine and received by the GUI.
     ///
     /// If the string contains multiple messages, only the first one is returned.
     ///
-    /// SAFETY: The parser should be able to process any input. An input string `s` that does not conform
-    /// to the USI protocol is returned as `GuiMessage::Unknown(s)``.
+    /// Note that all USI protocol messages must be terminated by a newline ('\n', '\r' or '\r\n').
+    /// This function will return a ParseError if the input string does not end with either
+    /// a newline or newline followed by ascii whitespace.
     ///
-    pub fn parse(s: &str) -> Result<Self, PestError<Rule>> {
-        match UsiParser::parse(Rule::engine_message, s) {
+    /// SAFETY: The parser should be able to process any newline-terminated input. An input string `input` 
+    /// that does not conform to the USI protocol is returned as `Ok(GuiMessage::Unknown(input))`.
+    ///
+    pub fn parse(input: &str) -> Result<Self, PestError<Rule>> {
+        match UsiParser::parse(Rule::start, input) {
             Ok(pairs) => Ok(Self::inner_parse(pairs.into_iter().next().unwrap())),
             Err(err) => Err(err),
         }
+    }
+
+    /// Parses the input and returns the first valid protocol Engine message, skipping Unknowns.
+    /// Returns `None` if no valid Engine message is found.
+    /// 
+    /// # Panics
+    /// 
+    /// This function will panic if the input string is not newline terminated.
+    /// 
+    pub fn parse_first_valid(input: &str) -> Option<Self> {
+        EngineMessageStream::new(input).find(|msg| !matches!(msg, EngineMessage::Unknown(_)))
     }
 
     pub fn inner_parse(p: Pair<'_, Rule>) -> Self {
@@ -350,8 +645,8 @@ impl EngineMessage {
     fn parse_id(pair: Pair<Rule>) -> Self {
         if let Some(sp) = pair.into_inner().next() {
             match sp.as_rule() {
-                Rule::id_name => return EngineMessage::Id(IdParams::Name(as_string!(sp))),
-                Rule::id_author => return EngineMessage::Id(IdParams::Author(as_string!(sp))),
+                Rule::id_name => return EngineMessage::Id(IdParams::Name(parse_tokens(sp))),
+                Rule::id_author => return EngineMessage::Id(IdParams::Author(parse_tokens(sp))),
                 _ => unreachable!(),
             }
         }
@@ -414,7 +709,7 @@ impl EngineMessage {
                     "checking" => return StatusCheck::Checking,
                     "ok" => return StatusCheck::Ok,
                     "error" => return StatusCheck::Error,
-                    _ => break,
+                    _ => unreachable!(),
                 };
             }
         }
@@ -443,7 +738,7 @@ impl EngineMessage {
         let mut default: Option<bool> = None;
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
                 Rule::check_default => default = Some(as_string!(sp).eq_ignore_ascii_case("true")),
                 _ => (),
             }
@@ -464,7 +759,7 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
                 Rule::spin_default => default = Some(parse_integer::<i32>(sp)),
                 Rule::spin_min => min = Some(parse_integer::<i32>(sp)),
                 Rule::spin_max => max = Some(parse_integer::<i32>(sp)),
@@ -492,9 +787,9 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => default = Some(as_string!(sp)),
-                Rule::var => vars.push(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::combo_default => default = Some(parse_tokens(sp)),
+                Rule::var_token => vars.push(parse_tokens(sp)),
                 _ => (),
             }
         }
@@ -517,8 +812,8 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => {
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::token => {
                     default = {
                         let s = as_string!(sp);
                         convert_empty!(s)
@@ -539,7 +834,7 @@ impl EngineMessage {
     fn parse_button_option(pair: Pair<Rule>) -> Self {
         for sp in pair.into_inner() {
             if sp.as_rule() == Rule::option_name {
-                let name = as_string!(sp);
+                let name = parse_tokens(sp);
                 return Self::Option(OptionParam::Button { name });
             }
         }
@@ -553,8 +848,8 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => {
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::token => {
                     default = {
                         let s = as_string!(sp);
                         convert_empty!(s)
@@ -667,7 +962,8 @@ impl EngineMessage {
 
 /// The EngineMessageStream struct enables iteration over a multi-line text string.
 pub struct EngineMessageStream<'a> {
-    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+    /// Inner PEST iterator over grammar Rules
+    pairs: Pairs<'a, Rule>,
 }
 
 impl<'a> EngineMessageStream<'a> {
@@ -776,6 +1072,17 @@ fn parse_millisecs(pair: Pair<Rule>) -> Duration {
         if let Rule::digits = sp.as_rule() {
             let milliseconds: u64 = as_str!(sp).parse::<u64>().unwrap();
             return Duration::from_millis(milliseconds);
+        }
+    }
+    unreachable!()
+}
+
+fn parse_tokens(pair: Pair<'_, Rule>) -> String {
+    for sp in pair.into_inner() {
+        match sp.as_rule() {
+            Rule::tokens => return as_string!(sp).to_owned(),
+            Rule::token => return as_string!(sp).to_owned(),
+            _ => return parse_tokens(sp),
         }
     }
     unreachable!()
