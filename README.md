@@ -1,4 +1,11 @@
-# haitaka-usi ハイタカ-usi
+# haitaka-usi ハイタカ-usi &emsp; [![Latest Version]][crates.io] [![Build Status]][actions] [![Documentation]][docs]
+
+[Build Status]: https://img.shields.io/github/actions/workflow/status/tofutofu/haitaka-usi/rust.yml?branch=main
+[actions]: https://github.com/tofutofu/haitaka-usi/actions?query=branch%3Amain
+[Latest Version]: https://img.shields.io/crates/v/haitaka-usi.svg
+[crates.io]: https://crates.io/crates/haitaka-usi
+[Documentation]: https://docs.rs/haitaka-usi/badge.svg
+[docs]: https://docs.rs/haitaka-usi
 
 Haitaka-usi is a [Universal Shogi Interface (USI) protocol](http://hgm.nubati.net/usi.html) parser and serializer.
 
