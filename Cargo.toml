@@ -2,6 +2,15 @@
 name = "haitaka-usi"
 version = "0.1.0"
 edition = "2024"
+authors = ["tofutofu <tofutofu@users.noreply.github.com>"]
+readme = "README.md"
+license = "MIT"
+description = "Universal Shogi Interface (USI) library "
+homepage = "https://github.com/tofutofu/haitaka-usi"
+repository = "https://github.com/tofutofu/haitaka-usi"
+keywords = ["USI", "shogi"]
+categories = ["games", "protocols"]
+
 
 [dependencies]
 pest = "2.8"
