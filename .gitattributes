@@ -1,1 +1,2 @@
-*.pest linguist-language=ANTLR
+# Linguist does directly support .pest files. Using PEG.js as work-around.
+*.pest linguist-language=PEG.js
