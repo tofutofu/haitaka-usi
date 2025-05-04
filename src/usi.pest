@@ -93,7 +93,7 @@ gui_message = _{
     debug | 
     isready | 
     setoption | 
-    register | 
+    register_user | 
     usinewgame | 
     stop | 
     ponderhit | 
@@ -130,7 +130,7 @@ setoption = ${ "setoption" ~ WS ~ "name" ~ WS ~ setoption_name ~ (WS ~ "value" ~
     setoption_name = ${ !("value") ~ token }
     setoption_value = ${ token }
 
-register = ${ register_later | register_with_name_and_code }
+register_user = ${ register_later | register_with_name_and_code }
 
     register_later = { "register" ~ WS ~ "later" }
     register_with_name_and_code = { "register" ~ WS ~ "name" ~ WS ~ register_name ~ WS ~ "code" ~ WS ~ register_code }

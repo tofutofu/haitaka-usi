@@ -127,7 +127,7 @@ impl GuiMessage {
             Rule::debug => Self::parse_debug(p),
             Rule::isready => Self::parse_isready(),
             Rule::setoption => Self::parse_setoption(p),
-            Rule::register => Self::parse_register(p),
+            Rule::register_user => Self::parse_register(p),
             Rule::usinewgame => Self::parse_usinewgame(),
             Rule::position => Self::parse_position(p),
             Rule::go => Self::parse_go(p),

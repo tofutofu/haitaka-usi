@@ -1,0 +1,2 @@
+# Linguist does not directly support .pest file syntax-highlighting. Using ANTLR as work-around.
+*.pest linguist-language=ANTLR
