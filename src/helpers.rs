@@ -1,4 +1,5 @@
-//! Helper macro.
+//! Some utilities.
+use std::time::Duration;
 
 /// Convert a vector of items into a string.
 ///
@@ -15,4 +16,21 @@ macro_rules! format_vec {
             .collect::<Vec<_>>()
             .join($joiner)
     };
+}
+
+/// A little custom trait to make it more convenient to work with Durations.
+pub trait IntoDuration {
+    fn into_duration(self) -> Duration;
+}
+
+impl IntoDuration for Duration {
+    fn into_duration(self) -> Duration {
+        self
+    }
+}
+
+impl IntoDuration for u64 {
+    fn into_duration(self) -> Duration {
+        Duration::from_millis(self)
+    }
 }

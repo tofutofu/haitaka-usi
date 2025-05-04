@@ -5,6 +5,7 @@
 //! - [将棋所USIプロトコル](https://shogidokoro2.stars.ne.jp/usi.html)
 //! - [The Universal Shogi Interface](http://hgm.nubati.net/usi.html)
 use crate::format_vec;
+use crate::helpers::IntoDuration;
 use haitaka_types::Move;
 use std::fmt;
 use std::time::Duration;
@@ -24,6 +25,7 @@ pub enum GuiMessage {
     /// usiok
     /// ```
     Usi,
+
     /// `debug` - turn debug mode on or off (not supported by all engines).
     /// ```text
     /// debug
@@ -31,17 +33,20 @@ pub enum GuiMessage {
     /// debug off
     /// ```
     Debug(bool),
+
     /// `isready` - asks the engine whether it is ready to start a game or a search.
     /// This command should be sent after receiving `usiok` and after possibly resetting
     /// some options by sending `setoption` commands. The engine should respond with
     /// `readyok`. The GUI should not send other commands before receiving `readyok`.
     IsReady,
-    /// `setoption` -sent to modify default engine option settings.
+
+    /// `setoption` - sent to modify default engine option settings.
     /// ```text
     /// setoption name <option_name>
     /// setoption name <option_name> value <option_value>
     /// ```
     SetOption { name: String, value: Option<String> },
+
     /// `register` - registers the user to the engine. This is only required if the
     /// engine sent a `registration error` message at startup.
     /// ```text
@@ -52,9 +57,11 @@ pub enum GuiMessage {
         name: Option<String>,
         code: Option<String>,
     },
+
     /// `usinewgame` - indicates that the next search (to be started with `position` and `go`)
     /// will be from a new game. It should always be followed by an `isready` command.
     UsiNewGame,
+
     /// `position` - specifies the board position and optional sequence of moves.
     /// ```text
     /// position startpos
@@ -62,12 +69,18 @@ pub enum GuiMessage {
     /// position <SFEN>
     /// position <SFEN> moves <moves>
     /// ```
+    /// The board position is either given as "startpos" or by specifying a
+    /// [SFEN](https://en.wikipedia.org/wiki/Shogi_notation#SFEN) string. The
+    /// [haitaka](https://crates.io/crates/haitaka) crate has a method to parse
+    /// SFEN strings and to serialize board position to SFEN strings. See:
+    /// [`haitaka::board::Board::from_sfen`](https://docs.rs/haitaka/0.2.2/haitaka/board/struct.Board.html#method.from_sfen).
     Position {
         sfen: Option<String>,
         moves: Option<Vec<Move>>,
     },
+
     /// `go` - tells the engine to start its search for the best move, given the position.
-    /// There are a number of optional subcommands to control the search and time settings
+    /// There are a number of optional subcommands to control search and time settings
     /// of the engine. All of those should be sent in the same `go` command:
     /// ```text
     /// searchmoves <moves> - restrict the search to these (alternative) moves only
@@ -86,12 +99,15 @@ pub enum GuiMessage {
     /// mate <ms> - search for a forced mate but only up to so many millisecs
     /// ```
     Go(EngineParams),
+
     /// `stop` - tells the engine to stop as soon as possible.
     Stop,
+
     /// `ponderhit` - indicates that the engine opponent (the user) played the move predicted by the
     /// engine in the previous `bestmove` message. The engine should continue searching but
     /// switch from pondering to normal search.
     PonderHit,
+
     /// `gameover` - informs the engine that the game has ended with the specified result
     /// (specified from the engine's point of view).
     /// ```text
@@ -100,17 +116,19 @@ pub enum GuiMessage {
     /// gameover draw
     /// ```
     GameOver(GameStatus),
+
     /// `quit` - tells the engine application to exit as soon as possible.
     Quit,
+
     /// This variant is a catch-all for messages that do not conform to the USI protocol.
     Unknown(String),
 }
 
-/// Represents status sent by "gameover" message.
+/// Represents the status sent by "gameover" message.
 ///
 /// Informs the engine that the game has ended with the specified result,
 /// from the engine's own point or view.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GameStatus {
     Win,
     Lose,
@@ -120,38 +138,56 @@ pub enum GameStatus {
 /// Engine search and time control parameters, sent by the "go" command.
 ///
 /// Multiple parameters will and should be set in one "go" command.
+///
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EngineParams {
-    /// Restrict search to these moves only
+    /// Restrict search to these moves only.
     searchmoves: Option<Vec<Move>>,
-    /// Start search in ponder mode
+
+    /// Start search in ponder mode.
     ponder: bool,
-    /// Black time left (ms)
+
+    /// Black time left (ms).
     btime: Option<Duration>,
-    /// White time left (ms)
+
+    /// White time left (ms).
     wtime: Option<Duration>,
-    /// Black time increment per move (if greater than 0)
+
+    /// Black time increment per move (if greater than 0), a small amount of time
+    /// added to the clock after each move (the "Fischer increment"). This is not
+    /// used in combination with `byoyomi`.
     binc: Option<Duration>,
-    /// White time increment per move (if greater than 0)
+
+    /// White time increment per move (if greater than 0), a small amount of time
+    /// added to the clock after each move (the "Fischer increment"). This is not
+    /// used in combination with `byoyomi`.
     winc: Option<Duration>,
-    /// Amount of time (ms) that each player is allowed to get negative on clock
+
+    /// Amount of time (ms) that each player is allowed per move after running out of time.
+    /// This parameter is not used in combination with `binc/winc`.
     byoyomi: Option<Duration>,
-    /// Number of moves (plies) until next time control. Only sent if greater than 0. (Not used in Shogi.)
+
+    /// Number of moves (plies) until next time control. Only sent if greater than 0.
     movestogo: Option<u16>,
+
     /// Search only this many plies.
     depth: Option<u16>,
+
     /// Search only this many nodes.
     nodes: Option<u32>,
+
     /// Search for mate in this amount of time (ms) or indefinitely long ("infinite")
     mate: Option<MateParam>,
+
     /// Search exactly this long (ms)
     movetime: Option<Duration>,
+
     /// Search until "stop" command is sent and received
     infinite: bool,
 }
 
 /// Mate paramater representing the "go mate x" command.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MateParam {
     /// Find a mate in this many millisecs
     Timeout(Duration),
@@ -177,32 +213,32 @@ impl EngineParams {
     }
 
     #[must_use]
-    pub fn btime(mut self, t: Duration) -> Self {
-        self.btime = Some(t);
+    pub fn btime<T: IntoDuration>(mut self, t: T) -> Self {
+        self.btime = Some(t.into_duration());
         self
     }
 
     #[must_use]
-    pub fn wtime(mut self, t: Duration) -> Self {
-        self.wtime = Some(t);
+    pub fn wtime<T: IntoDuration>(mut self, t: T) -> Self {
+        self.wtime = Some(t.into_duration());
         self
     }
 
     #[must_use]
-    pub fn binc(mut self, t: Duration) -> Self {
-        self.binc = Some(t);
+    pub fn binc<T: IntoDuration>(mut self, t: T) -> Self {
+        self.binc = Some(t.into_duration());
         self
     }
 
     #[must_use]
-    pub fn winc(mut self, t: Duration) -> Self {
-        self.winc = Some(t);
+    pub fn winc<T: IntoDuration>(mut self, t: T) -> Self {
+        self.winc = Some(t.into_duration());
         self
     }
 
     #[must_use]
-    pub fn byoyomi(mut self, t: Duration) -> Self {
-        self.byoyomi = Some(t);
+    pub fn byoyomi<T: IntoDuration>(mut self, t: T) -> Self {
+        self.byoyomi = Some(t.into_duration());
         self
     }
 
@@ -231,8 +267,8 @@ impl EngineParams {
     }
 
     #[must_use]
-    pub fn movetime(mut self, t: Duration) -> Self {
-        self.movetime = Some(t);
+    pub fn movetime<T: IntoDuration>(mut self, t: T) -> Self {
+        self.movetime = Some(t.into_duration());
         self
     }
 

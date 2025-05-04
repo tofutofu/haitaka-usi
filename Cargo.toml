@@ -6,7 +6,5 @@ edition = "2024"
 [dependencies]
 pest = "2.8"
 pest_derive = "2.8"
+haitaka-types = "0.1.2"
 
-[dependencies.haitaka-types]
-version = "0.1.2"
-features = ["std"]

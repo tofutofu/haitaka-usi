@@ -19,12 +19,15 @@ pub enum EngineMessage {
     /// id author tofutofu
     /// ```
     Id(IdParams),
+
     /// `usiok` - sent to finalize the initial handshake between GUI and engine. This
     /// message is sent after the `id` and initial `option` messages.
     UsiOk,
+
     /// `readyok` - sent in response to the `isready` message to inform the GUI that
     /// the engine is ready to start a search.
     ReadyOk,
+
     /// `bestmove` - sent in response to a `go` command, to inform the GUI that the engine
     /// has stopped searching and found a good move. The engine can also use this command
     /// to resign or claim a win.
@@ -35,6 +38,7 @@ pub enum EngineMessage {
     /// bestmove win
     /// ```
     BestMove(BestMoveParams),
+
     /// `checkmate` - sent as termination of a `go mate` command.
     /// ```text
     /// checkmate <moves> - a forced mate principal sequence of moves (sokuzumi)
@@ -43,6 +47,7 @@ pub enum EngineMessage {
     /// checkmate notimplemented - the engine does not implement tsume shogi search
     /// ```
     CheckMate(CheckMateParams),
+
     /// `copyprotection` - sent by engines that check copy protection:
     /// ```text
     /// copyprotection error
@@ -50,6 +55,7 @@ pub enum EngineMessage {
     /// copyprotection ok
     /// ```
     CopyProtection(StatusCheck),
+
     /// `registration` - sent by engines that may require the user (GUI) to register
     /// by name and registration code.
     /// ```text
@@ -58,6 +64,7 @@ pub enum EngineMessage {
     /// registration ok
     /// ```
     Registration(StatusCheck),
+
     /// `option` - informs the GUI about available engine options. Options are
     /// distinguished by type and name. Examples:
     /// ```text
@@ -89,6 +96,7 @@ pub enum EngineMessage {
     ///
     /// Engines may only support a subset of options. For details, please consult the engine documentation.
     Option(OptionParam),
+
     /// `info` - informs the GUI, during the search, about the status of the search. The engine may send
     /// either selected `info` messages or multiple infos in one message. All infos about the principal
     /// variation should be sent in one message. Infos about multipv should be sent in successive
@@ -103,6 +111,7 @@ pub enum EngineMessage {
     /// info score cp -157 multipv 3 pv 5g5f 4g4f 4e3c+ 4c3c
     /// ```
     Info(Vec<InfoParam>),
+
     /// This variant is a catch-all for messages that do not conform to the USI protocol.
     Unknown(String),
 }
@@ -186,16 +195,17 @@ pub enum OptionParam {
 /// Represents possible payloads of the "info" message.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum InfoParam {
-    /// The `info depth` message.
+    /// The `info depth` message. Search depth in plies.
     Depth(u16),
 
-    /// The `info seldepth` message.
+    /// The `info seldepth` message. Selective search depth in plies.
+    /// This also requires `depth` to be sent.
     SelDepth(u16),
 
-    /// The `info time` message.
+    /// The `info time` message. The time searched. Should be sent with the pv.
     Time(Duration),
 
-    /// The `info nodes` message.
+    /// The `info nodes` message. Number of nodes searched.
     Nodes(u64),
 
     /// The `info pv` message (principal variation, best line).
@@ -204,17 +214,18 @@ pub enum InfoParam {
     /// The `info pv ... multipv` message (the pv line number in a multi pv sequence).
     MultiPv(u16),
 
-    /// The 'info score cp ...' message.
+    /// The 'info score cp ...' message. The score in centipawns (from engine's point of view).
     ScoreCp(i32, ScoreBound),
 
-    /// The info score mate ...' message.
+    /// The info score mate ...' message. Mate in this many plies. Negative values are
+    /// used to indicate that the engine is being mated.
     ScoreMate(Option<i32>, ScoreBound),
 
-    /// The `info currmove` message (current move).
+    /// The `info currmove` message (current move being searched).
     CurrMove(Move),
 
     /// The `info currmovenum` message (current move number).
-    CurrMoveNum(u16),
+    CurrMoveNumber(u16),
 
     /// The `info hashfull` message (occupancy of hash tables in permills, from 0 to 1000).
     HashFull(u16),
@@ -318,15 +329,20 @@ impl fmt::Display for OptionParam {
         match self {
             Self::Check { name, default } => {
                 if let Some(default) = default {
-                    write!(f, "name {} default {}", name, default)
+                    write!(f, "name {} type check default {}", name, default)
                 } else {
-                    write!(f, "name {}", name)
+                    write!(f, "name {} type check", name)
                 }
             }
-            Self::String { name, default } | Self::Filename { name, default } => match default {
-                Some(s) if s.is_empty() => write!(f, "name {} default <empty>", name),
-                Some(s) => write!(f, "name {} default {}", name, s),
-                _ => write!(f, "name {}", name),
+            Self::String { name, default } => match default {
+                Some(s) if s.is_empty() => write!(f, "name {} type string default <empty>", name),
+                Some(s) => write!(f, "name {} type string default {}", name, s),
+                _ => write!(f, "name {} type string", name), // seems invalid
+            },
+            Self::Filename { name, default } => match default {
+                Some(s) if s.is_empty() => write!(f, "name {} type filename default <empty>", name),
+                Some(s) => write!(f, "name {} type filename default {}", name, s),
+                _ => write!(f, "name {} type filename", name), // seems invalid
             },
             Self::Button { name } => write!(f, "name {} type button", name),
             Self::Spin {
@@ -335,7 +351,7 @@ impl fmt::Display for OptionParam {
                 min,
                 max,
             } => {
-                let mut opt = format!("name {}", name);
+                let mut opt = format!("name {} type spin", name);
                 if let Some(default) = default {
                     opt += &format!(" default {}", default);
                 }
@@ -352,12 +368,12 @@ impl fmt::Display for OptionParam {
                 default,
                 vars,
             } => {
-                let mut opt = format!("name {}", name);
+                let mut opt = format!("name {} type combo", name);
                 if let Some(default) = default {
                     opt += &format!(" default {}", default);
                 }
                 if !vars.is_empty() {
-                    opt += &format!(" var {}", format_vec!(vars, "var "));
+                    opt += &format!(" var {}", format_vec!(vars, " var "));
                 }
                 write!(f, "{}", opt)
             }
@@ -379,12 +395,12 @@ impl fmt::Display for InfoParam {
                 if let Some(plies) = plies {
                     write!(f, "score mate {}{}", plies, bound)
                 } else {
-                    assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
+                    debug_assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
                     write!(f, "score mate{}", bound)
                 }
             }
             Self::CurrMove(mv) => write!(f, "currmove {}", mv),
-            Self::CurrMoveNum(n) => write!(f, "currmovenum {}", n),
+            Self::CurrMoveNumber(n) => write!(f, "currmovenumber {}", n),
             Self::HashFull(n) => write!(f, "hashfull {}", n),
             Self::Nps(n) => write!(f, "nps {}", n),
             Self::CpuLoad(n) => write!(f, "cpuload {}", n),
@@ -392,7 +408,7 @@ impl fmt::Display for InfoParam {
             Self::Refutation(mvs) => write!(f, "refutation {}", format_vec!(mvs)),
             Self::CurrLine { cpu_nr, line } => {
                 if let Some(cpu_nr) = cpu_nr {
-                    write!(f, "currline cpunr {} {}", cpu_nr, format_vec!(line))
+                    write!(f, "currline {} {}", cpu_nr, format_vec!(line))
                 } else {
                     write!(f, "currline {}", format_vec!(line))
                 }
