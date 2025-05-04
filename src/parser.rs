@@ -1,4 +1,14 @@
-// parser.rs
+//! This module implements the USI parser.
+//!
+//! The [PEG grammar](https://en.wikipedia.org/wiki/Parsing_expression_grammar) used by this crate
+//! is part of the source code as [usi.pest](https://github.com/tofutofu/haitaka-usi/blob/main/src/usi.pest)
+//!
+//! The main parse functions are
+//! - [`GuiMessage::parse`]
+//! - [`GuiMessage::parse_first_valid`]
+//! - [`EngineMessage::parse`]
+//! - [`EngineMessage::parse_first_valid`]
+//!
 #![allow(clippy::result_large_err)]
 
 use core::str::FromStr;
@@ -58,19 +68,57 @@ macro_rules! convert_empty {
     };
 }
 
+/// Extract a Move from a PEST Pair.
+macro_rules! as_move {
+    ($sp:ident) => {
+        Move::from_str(as_str!($sp)).unwrap()
+    };
+}
+
 impl GuiMessage {
-    /// Parse one USI message, sent by the GUI and to be received by the Engine.
+    /// Parse one USI message, sent by the GUI and received by the Engine.
     ///
     /// If the string contains multiple messages, only the first one is returned.
     ///
-    /// SAFETY: The parser should be able to process any input. An input string `s` that does not conform
-    /// to the USI protocol is returned as `GuiMessage::Unknown(s)``.
+    /// Note that all USI protocol messages must be terminated by a newline ('\n', '\r' or '\r\n').
+    /// This function will return a ParseError if the input string does not end with either
+    /// a newline or newline followed by ascii whitespace.
     ///
-    pub fn parse(s: &str) -> Result<Self, PestError<Rule>> {
-        match UsiParser::parse(Rule::gui_message, s) {
+    /// SAFETY: The parser should be able to process any newline-terminated input. An input string
+    /// `input` that does not conform to the USI protocol is returned as `Ok(EngineMessage::Unknown(input))`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use haitaka_usi::*;
+    /// let input = "usi\n";
+    /// let msg = GuiMessage::parse(input).unwrap();
+    /// assert_eq!(msg, GuiMessage::Usi);
+    /// ```
+    pub fn parse(input: &str) -> Result<Self, PestError<Rule>> {
+        match UsiParser::parse(Rule::start, input) {
             Ok(pairs) => Ok(Self::inner_parse(pairs.into_iter().next().unwrap())),
             Err(err) => Err(err),
         }
+    }
+
+    /// Parses the input and returns the first valid protocol GUI message, skipping Unknowns.
+    /// Returns `None` if no valid message is found.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the input string is not newline terminated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use haitaka_usi::*;
+    /// let input = "yo\nyo usinewgame\n";
+    /// let msg = GuiMessage::parse_first_valid(input).unwrap();
+    /// assert_eq!(msg, GuiMessage::UsiNewGame);
+    /// ```
+    pub fn parse_first_valid(input: &str) -> Option<Self> {
+        GuiMessageStream::new(input).find(|msg| !matches!(msg, GuiMessage::Unknown(_)))
     }
 
     fn inner_parse(p: Pair<'_, Rule>) -> Self {
@@ -171,7 +219,13 @@ impl GuiMessage {
                     assert!(sfen.is_none());
                 }
                 Rule::sfenpos => {
-                    sfen = Some(as_string!(sp));
+                    sfen = Some(
+                        as_str!(sp)
+                            .strip_prefix("sfen ")
+                            .unwrap()
+                            .trim()
+                            .to_string(),
+                    );
                 }
                 Rule::moves => {
                     moves = Some(parse_moves(sp));
@@ -226,8 +280,6 @@ impl GuiMessage {
                 Rule::movestogo => {
                     params = params.movestogo(parse_digits::<u16>(sp));
                 }
-
-                // implicit assumption is that these are alternatives   TODO: double-check
                 Rule::ponder => {
                     params = params.ponder();
                 }
@@ -272,19 +324,21 @@ impl GuiMessage {
 
 /// The GuiMessageStream struct enables iteration over a multi-line text string.
 pub struct GuiMessageStream<'a> {
-    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+    /// Inner PEST iterator over grammar Rules
+    pairs: Pairs<'a, Rule>,
 }
 
 impl<'a> GuiMessageStream<'a> {
     /// Create a new `GuiMessageStream` from an input string.
+    ///
+    /// SAFETY: Since the grammar is designed to process any input, this should never fail.
     pub fn new(input: &'a str) -> Self {
         Self::parse(input)
     }
 
     /// Parse a multi-line input string and return a GuiMessageStream instance.
     ///
-    /// SAFETY: Since the parser should be able to handle any input, this should
-    /// never fail.
+    /// SAFETY: Since the parser should be able to handle any input, this should never fail.
     pub fn parse(input: &'a str) -> Self {
         Self::try_parse(input).expect("Internal error: Failed to initialize UsiParser.")
     }
@@ -313,21 +367,58 @@ impl Iterator for GuiMessageStream<'_> {
 // EngineMessage parser
 
 impl EngineMessage {
-    /// Parse one USI message, sent by the Engine and to be received by the GUI.
+    /// Parse one USI message, sent by the Engine and received by the GUI.
     ///
     /// If the string contains multiple messages, only the first one is returned.
     ///
-    /// SAFETY: The parser should be able to process any input. An input string `s` that does not conform
-    /// to the USI protocol is returned as `GuiMessage::Unknown(s)``.
+    /// Note that all USI protocol messages must be terminated by a newline ('\n', '\r' or '\r\n').
+    /// This function will return a ParseError if the input string does not end with either
+    /// a newline or newline followed by ascii whitespace.
     ///
-    pub fn parse(s: &str) -> Result<Self, PestError<Rule>> {
-        match UsiParser::parse(Rule::engine_message, s) {
+    /// SAFETY: The parser should be able to process any newline-terminated input. An input string `input`
+    /// that does not conform to the USI protocol is returned as `Ok(GuiMessage::Unknown(input))`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use haitaka_usi::*;
+    /// use haitaka_types::*;
+    /// let input = "bestmove 3c3d\n";
+    /// let msg = EngineMessage::parse(input).unwrap();
+    /// let mv = "3c3d".parse::<Move>().unwrap();
+    /// assert_eq!(msg,
+    ///     EngineMessage::BestMove(
+    ///         BestMoveParams::BestMove {
+    ///             bestmove: mv,
+    ///             ponder: None })
+    /// );
+    /// let input = "bestmove resign\n";
+    /// let msg = EngineMessage::parse(input).unwrap();
+    /// assert_eq!(msg,
+    ///     EngineMessage::BestMove(
+    ///         BestMoveParams::Resign
+    ///     )
+    /// );
+    /// ```
+    pub fn parse(input: &str) -> Result<Self, PestError<Rule>> {
+        match UsiParser::parse(Rule::start, input) {
             Ok(pairs) => Ok(Self::inner_parse(pairs.into_iter().next().unwrap())),
             Err(err) => Err(err),
         }
     }
 
-    pub fn inner_parse(p: Pair<'_, Rule>) -> Self {
+    /// Parses the input and returns the first valid protocol Engine message, skipping Unknowns.
+    /// Returns `None` if no valid Engine message is found.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the input string is not newline terminated.
+    ///
+    pub fn parse_first_valid(input: &str) -> Option<Self> {
+        EngineMessageStream::new(input).find(|msg| !matches!(msg, EngineMessage::Unknown(_)))
+    }
+
+    fn inner_parse(p: Pair<'_, Rule>) -> Self {
         match p.as_rule() {
             Rule::id => Self::parse_id(p),
             Rule::usiok => Self::parse_usiok(),
@@ -350,8 +441,8 @@ impl EngineMessage {
     fn parse_id(pair: Pair<Rule>) -> Self {
         if let Some(sp) = pair.into_inner().next() {
             match sp.as_rule() {
-                Rule::id_name => return EngineMessage::Id(IdParams::Name(as_string!(sp))),
-                Rule::id_author => return EngineMessage::Id(IdParams::Author(as_string!(sp))),
+                Rule::id_name => return EngineMessage::Id(IdParams::Name(parse_tokens(sp))),
+                Rule::id_author => return EngineMessage::Id(IdParams::Author(parse_tokens(sp))),
                 _ => unreachable!(),
             }
         }
@@ -376,10 +467,10 @@ impl EngineMessage {
         for sp in pair.into_inner() {
             match sp.as_rule() {
                 Rule::one_move => {
-                    bestmove = Some(Move::from_str(as_str!(sp)).unwrap());
+                    bestmove = Some(as_move!(sp));
                 }
                 Rule::ponder_move => {
-                    ponder = Some(Move::from_str(as_str!(sp)).unwrap());
+                    ponder = Some(parse_move(sp));
                 }
                 Rule::resign => return EngineMessage::BestMove(BestMoveParams::Resign),
                 Rule::win => return EngineMessage::BestMove(BestMoveParams::Win),
@@ -414,7 +505,7 @@ impl EngineMessage {
                     "checking" => return StatusCheck::Checking,
                     "ok" => return StatusCheck::Ok,
                     "error" => return StatusCheck::Error,
-                    _ => break,
+                    _ => unreachable!(),
                 };
             }
         }
@@ -443,7 +534,7 @@ impl EngineMessage {
         let mut default: Option<bool> = None;
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
                 Rule::check_default => default = Some(as_string!(sp).eq_ignore_ascii_case("true")),
                 _ => (),
             }
@@ -464,7 +555,7 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
                 Rule::spin_default => default = Some(parse_integer::<i32>(sp)),
                 Rule::spin_min => min = Some(parse_integer::<i32>(sp)),
                 Rule::spin_max => max = Some(parse_integer::<i32>(sp)),
@@ -492,9 +583,9 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => default = Some(as_string!(sp)),
-                Rule::var => vars.push(as_string!(sp)),
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::combo_default => default = Some(parse_tokens(sp)),
+                Rule::var_token => vars.push(parse_tokens(sp)),
                 _ => (),
             }
         }
@@ -517,8 +608,8 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => {
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::token => {
                     default = {
                         let s = as_string!(sp);
                         convert_empty!(s)
@@ -539,7 +630,7 @@ impl EngineMessage {
     fn parse_button_option(pair: Pair<Rule>) -> Self {
         for sp in pair.into_inner() {
             if sp.as_rule() == Rule::option_name {
-                let name = as_string!(sp);
+                let name = parse_tokens(sp);
                 return Self::Option(OptionParam::Button { name });
             }
         }
@@ -553,8 +644,8 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::option_name => name = Some(as_string!(sp)),
-                Rule::default => {
+                Rule::option_name => name = Some(parse_tokens(sp)),
+                Rule::token => {
                     default = {
                         let s = as_string!(sp);
                         convert_empty!(s)
@@ -580,13 +671,13 @@ impl EngineMessage {
                 Rule::info_seldepth => InfoParam::SelDepth(parse_digits::<u16>(sp)),
                 Rule::info_time => InfoParam::Time(parse_millisecs(sp)),
                 Rule::info_nodes => InfoParam::Nodes(parse_digits::<u64>(sp)),
-                Rule::info_currmovenum => InfoParam::CurrMoveNum(parse_digits::<u16>(sp)),
+                Rule::info_currmovenumber => InfoParam::CurrMoveNumber(parse_digits::<u16>(sp)),
                 Rule::info_currmove => InfoParam::CurrMove(parse_move(sp)),
                 Rule::info_hashfull => InfoParam::HashFull(parse_digits::<u16>(sp)),
                 Rule::info_nps => InfoParam::Nps(parse_digits::<u64>(sp)),
                 Rule::info_cpuload => InfoParam::CpuLoad(parse_digits::<u16>(sp)),
                 Rule::info_multipv => InfoParam::MultiPv(parse_digits::<u16>(sp)),
-                Rule::info_string => InfoParam::String(as_string!(sp)),
+                Rule::info_string => InfoParam::String(parse_tokens(sp)),
                 Rule::info_pv => InfoParam::Pv(parse_moves(sp)),
                 Rule::info_refutation => InfoParam::Refutation(parse_moves(sp)),
                 Rule::info_currline => Self::parse_currline(sp),
@@ -606,7 +697,7 @@ impl EngineMessage {
 
         for sp in pair.into_inner() {
             match sp.as_rule() {
-                Rule::digits => cpu_nr = Some(parse_digits::<u16>(sp)),
+                Rule::cpunr => cpu_nr = Some(parse_digits::<u16>(sp)),
                 Rule::moves => line = parse_moves(sp),
                 _ => unreachable!(),
             }
@@ -667,7 +758,8 @@ impl EngineMessage {
 
 /// The EngineMessageStream struct enables iteration over a multi-line text string.
 pub struct EngineMessageStream<'a> {
-    pairs: Pairs<'a, Rule>, // Inner iterator from PEST
+    /// Inner PEST iterator over grammar Rules
+    pairs: Pairs<'a, Rule>,
 }
 
 impl<'a> EngineMessageStream<'a> {
@@ -715,7 +807,7 @@ impl Iterator for EngineMessageStream<'_> {
 fn parse_move(pair: Pair<Rule>) -> Move {
     for sp in pair.into_inner() {
         if let Rule::one_move = sp.as_rule() {
-            return as_str!(sp).parse::<Move>().unwrap();
+            return as_move!(sp);
         }
     }
     unreachable!()
@@ -727,8 +819,7 @@ fn parse_moves(pair: Pair<Rule>) -> Vec<Move> {
     for sp in pair.into_inner() {
         match sp.as_rule() {
             Rule::one_move => {
-                let mv = Move::from_str(as_str!(sp)).unwrap();
-                moves.push(mv);
+                moves.push(as_move!(sp));
             }
             Rule::moves => {
                 let mvs: Vec<Move> = parse_moves(sp);
@@ -776,6 +867,17 @@ fn parse_millisecs(pair: Pair<Rule>) -> Duration {
         if let Rule::digits = sp.as_rule() {
             let milliseconds: u64 = as_str!(sp).parse::<u64>().unwrap();
             return Duration::from_millis(milliseconds);
+        }
+    }
+    unreachable!()
+}
+
+fn parse_tokens(pair: Pair<'_, Rule>) -> String {
+    if let Some(sp) = pair.into_inner().next() {
+        match sp.as_rule() {
+            Rule::tokens => return as_string!(sp).to_owned(),
+            Rule::token => return as_string!(sp).to_owned(),
+            _ => return parse_tokens(sp),
         }
     }
     unreachable!()

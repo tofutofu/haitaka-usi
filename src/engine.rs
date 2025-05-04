@@ -1,4 +1,9 @@
-//! This module contains the data-model for EngineMessage, the commands sent from Engine to GUI.
+//! This module contains the data model for EngineMessage, the commands sent from Engine to GUI.
+//! The main enum is [`EngineMessage`] which encodes all messages sent from a Shogi engine to the GUI.
+//!
+//! For full documenation about the protocol see
+//! - [将棋所USIプロトコル](https://shogidokoro2.stars.ne.jp/usi.html)
+//! - [The Universal Shogi Interface](http://hgm.nubati.net/usi.html)
 use crate::format_vec;
 use haitaka_types::Move;
 use std::fmt;
@@ -7,15 +12,107 @@ use std::time::Duration;
 /// Messages sent from the Shogi Engine to the GUI.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum EngineMessage {
+    /// `id` - the `id` message informs the GUI about the engine name and engine
+    /// developer. This message is sent as initial response to the GUI `usi` message.
+    /// ```text
+    /// id name haitaka-shogi
+    /// id author tofutofu
+    /// ```
     Id(IdParams),
+
+    /// `usiok` - sent to finalize the initial handshake between GUI and engine. This
+    /// message is sent after the `id` and initial `option` messages.
     UsiOk,
+
+    /// `readyok` - sent in response to the `isready` message to inform the GUI that
+    /// the engine is ready to start a search.
     ReadyOk,
+
+    /// `bestmove` - sent in response to a `go` command, to inform the GUI that the engine
+    /// has stopped searching and found a good move. The engine can also use this command
+    /// to resign or claim a win.
+    /// ```text
+    /// bestmove <move>
+    /// bestmove <move> ponder <move>
+    /// bestmove resign
+    /// bestmove win
+    /// ```
     BestMove(BestMoveParams),
+
+    /// `checkmate` - sent as termination of a `go mate` command.
+    /// ```text
+    /// checkmate <moves> - a forced mate principal sequence of moves (sokuzumi)
+    /// checkmate nomate - the engine was able to prove there is no forced mate
+    /// checkmate timeout - the search timed out inconclusively
+    /// checkmate notimplemented - the engine does not implement tsume shogi search
+    /// ```
     CheckMate(CheckMateParams),
+
+    /// `copyprotection` - sent by engines that check copy protection:
+    /// ```text
+    /// copyprotection error
+    /// copyprotection checking
+    /// copyprotection ok
+    /// ```
     CopyProtection(StatusCheck),
+
+    /// `registration` - sent by engines that may require the user (GUI) to register
+    /// by name and registration code.
+    /// ```text
+    /// registration error
+    /// registration checking
+    /// registration ok
+    /// ```
     Registration(StatusCheck),
+
+    /// `option` - informs the GUI about available engine options. Options are
+    /// distinguished by type and name. Examples:
+    /// ```text
+    /// option name UseBook type check default true
+    /// option name Selectivity type spin default 2 min 0 max 4
+    /// option name Style type combo default Normal var Solid var Normal var Risky
+    /// option name ResetLearning type button
+    /// option name BookFile type string default public.bin
+    /// option name LearningFile type filename default <empty>
+    /// ```
+    /// Available engine options are sent by the engine in response to the `usi` command.
+    /// The GUI can in that case respond by modifying an option with a `setoption` message.
+    /// Option names can never have spaces. Certain names have fixed semantics:
+    /// ```text
+    /// - USI_Hash type spin - MB memory to use for hash tables
+    /// - USI_Ponder type check - when set, the engine is allowed to "ponder" (think during opponent's time)
+    /// - USI_OwnBook type check - the engine has its own opening book
+    /// - USI_Multipv type spin - the engine supports multi bestline mode (default is 1)
+    /// - USI_ShowCurrLine type check - the engine can show the current line while searching (false by default)
+    /// - USI_ShowRefutations type check - the engine can show a move and its refutation (false by default)
+    /// - USI_LimitStrength type check - the engine can adjust its strength (false by default)
+    /// - USI_Strength type spin - the engine plays at the indicated strenght level (negative values
+    /// represent kyu levels, positive values dan levels), requires USI_LimitStrength to be set
+    /// - USI_AnalyseMode type check - the engine may behave differently when analysing or playing a game
+    /// ```
+    /// The `USI_Hash` and especially the `USI_Ponder` options should always be supported. Note that even
+    /// when the ponder option is available and enabled, the engine should still only start pondering when
+    /// it receives a `go ponder` command.
+    ///
+    /// Engines may only support a subset of options. For details, please consult the engine documentation.
     Option(OptionParam),
+
+    /// `info` - informs the GUI, during the search, about the status of the search. The engine may send
+    /// either selected `info` messages or multiple infos in one message. All infos about the principal
+    /// variation should be sent in one message. Infos about multipv should be sent in successive
+    /// lines. Examples:
+    /// ```text
+    /// info time 1141 depth 3 nodes 135125 score cp -1521 pv 3a3b L*4h 4c4d
+    /// info depth 2 score cp 214 time 1242 nodes 2124 nps 34928 pv 2g2f 8c8d 2f2e
+    /// info nodes 120000 nps 116391 hashfull 104
+    /// info string 7g7f (70%)
+    /// info score cp 156 multipv 1 pv P*5h 4g5g 5h5g 8b8f
+    /// info score cp -99 multipv 2 pv 2d4d 3c4e 8h5e N*7f
+    /// info score cp -157 multipv 3 pv 5g5f 4g4f 4e3c+ 4c3c
+    /// ```
     Info(Vec<InfoParam>),
+
+    /// This variant is a catch-all for messages that do not conform to the USI protocol.
     Unknown(String),
 }
 
@@ -59,7 +156,7 @@ pub enum StatusCheck {
     /// Signifies copy protection or registration has been validated.
     Ok,
 
-    /// Signifies error in copy protection or registratin validation.
+    /// Signifies error in copy protection or registration validation.
     Error,
 }
 
@@ -98,16 +195,17 @@ pub enum OptionParam {
 /// Represents possible payloads of the "info" message.
 #[derive(Clone, Eq, PartialEq, Debug, Hash)]
 pub enum InfoParam {
-    /// The `info depth` message.
+    /// The `info depth` message. Search depth in plies.
     Depth(u16),
 
-    /// The `info seldepth` message.
+    /// The `info seldepth` message. Selective search depth in plies.
+    /// This also requires `depth` to be sent.
     SelDepth(u16),
 
-    /// The `info time` message.
+    /// The `info time` message. The time searched. Should be sent with the pv.
     Time(Duration),
 
-    /// The `info nodes` message.
+    /// The `info nodes` message. Number of nodes searched.
     Nodes(u64),
 
     /// The `info pv` message (principal variation, best line).
@@ -116,17 +214,18 @@ pub enum InfoParam {
     /// The `info pv ... multipv` message (the pv line number in a multi pv sequence).
     MultiPv(u16),
 
-    /// The 'info score cp ...' message.
+    /// The 'info score cp ...' message. The score in centipawns (from engine's point of view).
     ScoreCp(i32, ScoreBound),
 
-    /// The info score mate ...' message.
+    /// The info score mate ...' message. Mate in this many plies. Negative values are
+    /// used to indicate that the engine is being mated.
     ScoreMate(Option<i32>, ScoreBound),
 
-    /// The `info currmove` message (current move).
+    /// The `info currmove` message (current move being searched).
     CurrMove(Move),
 
     /// The `info currmovenum` message (current move number).
-    CurrMoveNum(u16),
+    CurrMoveNumber(u16),
 
     /// The `info hashfull` message (occupancy of hash tables in permills, from 0 to 1000).
     HashFull(u16),
@@ -161,6 +260,9 @@ pub enum ScoreBound {
     Lower,
     Upper,
 }
+
+// Note that the Display for EngineMessage does not add a terminating newline character.
+// When actually sending protocol messages a writer should add the '\n'.
 
 impl fmt::Display for EngineMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -227,15 +329,20 @@ impl fmt::Display for OptionParam {
         match self {
             Self::Check { name, default } => {
                 if let Some(default) = default {
-                    write!(f, "name {} default {}", name, default)
+                    write!(f, "name {} type check default {}", name, default)
                 } else {
-                    write!(f, "name {}", name)
+                    write!(f, "name {} type check", name)
                 }
             }
-            Self::String { name, default } | Self::Filename { name, default } => match default {
-                Some(s) if s.is_empty() => write!(f, "name {} default <empty>", name),
-                Some(s) => write!(f, "name {} default {}", name, s),
-                _ => write!(f, "name {}", name),
+            Self::String { name, default } => match default {
+                Some(s) if s.is_empty() => write!(f, "name {} type string default <empty>", name),
+                Some(s) => write!(f, "name {} type string default {}", name, s),
+                _ => write!(f, "name {} type string", name), // seems invalid
+            },
+            Self::Filename { name, default } => match default {
+                Some(s) if s.is_empty() => write!(f, "name {} type filename default <empty>", name),
+                Some(s) => write!(f, "name {} type filename default {}", name, s),
+                _ => write!(f, "name {} type filename", name), // seems invalid
             },
             Self::Button { name } => write!(f, "name {} type button", name),
             Self::Spin {
@@ -244,7 +351,7 @@ impl fmt::Display for OptionParam {
                 min,
                 max,
             } => {
-                let mut opt = format!("name {}", name);
+                let mut opt = format!("name {} type spin", name);
                 if let Some(default) = default {
                     opt += &format!(" default {}", default);
                 }
@@ -261,12 +368,12 @@ impl fmt::Display for OptionParam {
                 default,
                 vars,
             } => {
-                let mut opt = format!("name {}", name);
+                let mut opt = format!("name {} type combo", name);
                 if let Some(default) = default {
                     opt += &format!(" default {}", default);
                 }
                 if !vars.is_empty() {
-                    opt += &format!(" var {}", format_vec!(vars, "var "));
+                    opt += &format!(" var {}", format_vec!(vars, " var "));
                 }
                 write!(f, "{}", opt)
             }
@@ -288,12 +395,12 @@ impl fmt::Display for InfoParam {
                 if let Some(plies) = plies {
                     write!(f, "score mate {}{}", plies, bound)
                 } else {
-                    assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
+                    debug_assert!(*bound == ScoreBound::MateMin || *bound == ScoreBound::MatePlus);
                     write!(f, "score mate{}", bound)
                 }
             }
             Self::CurrMove(mv) => write!(f, "currmove {}", mv),
-            Self::CurrMoveNum(n) => write!(f, "currmovenum {}", n),
+            Self::CurrMoveNumber(n) => write!(f, "currmovenumber {}", n),
             Self::HashFull(n) => write!(f, "hashfull {}", n),
             Self::Nps(n) => write!(f, "nps {}", n),
             Self::CpuLoad(n) => write!(f, "cpuload {}", n),
@@ -301,7 +408,7 @@ impl fmt::Display for InfoParam {
             Self::Refutation(mvs) => write!(f, "refutation {}", format_vec!(mvs)),
             Self::CurrLine { cpu_nr, line } => {
                 if let Some(cpu_nr) = cpu_nr {
-                    write!(f, "currline cpunr {} {}", cpu_nr, format_vec!(line))
+                    write!(f, "currline {} {}", cpu_nr, format_vec!(line))
                 } else {
                     write!(f, "currline {}", format_vec!(line))
                 }
