@@ -8,9 +8,8 @@ license = "MIT"
 description = "Universal Shogi Interface (USI) library "
 homepage = "https://github.com/tofutofu/haitaka-usi"
 repository = "https://github.com/tofutofu/haitaka-usi"
-keywords = ["USI", "shogi"]
-categories = ["games", "protocols"]
-
+keywords = ["usi", "shogi"]
+categories = ["games"]
 
 [dependencies]
 pest = "2.8"
