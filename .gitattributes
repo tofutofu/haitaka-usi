@@ -1,2 +1,2 @@
-# Linguist does directly support .pest files. Using PEG.js as work-around.
-*.pest linguist-language=Rust
+# Linguist does directly support .pest file syntax-highlighting. Using PEG as work-around.
+*.pest linguist-language=PEG
