@@ -1,2 +1,3 @@
-# Linguist does directly support .pest file syntax-highlighting. Using PEG as work-around.
+# Linguist does not directly support .pest file syntax-highlighting. 
+# Using PEG as work-around, even though this makes it appear as if there is sth wrong with 'register'.
 *.pest linguist-language=PEG
